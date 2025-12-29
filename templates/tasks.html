@@ -84,11 +84,15 @@
                                 </td>
                                 <td>
                                     <div class="small">
-                                        总轮次: {{ task.total_rounds }}<br>
-                                        成功: <span class="text-success">{{ task.successful_rounds }}</span><br>
-                                        失败: <span class="text-danger">{{ task.failed_rounds }}</span>
-                                        {% if task.total_rounds > 0 %}
-                                        <br>成功率: {{ "%.1f"|format((task.successful_rounds / task.total_rounds) * 100) }}%
+                                        <strong>完成: {{ task.successful_rounds }}/{{ task.rounds }}</strong>
+                                        {% if task.supplement_orders > 0 %}
+                                        <br>补单: <span class="text-warning">{{ task.supplement_orders }}</span>
+                                        {% endif %}
+                                        {% if task.total_cost_diff > 0 %}
+                                        <br>损耗: <span class="text-danger">{{ "%.4f"|format(task.total_cost_diff) }} USDT</span>
+                                        {% endif %}
+                                        {% if task.successful_rounds > 0 and task.rounds > 0 %}
+                                        <br>完成率: {{ "%.1f"|format((task.successful_rounds / task.rounds) * 100) }}%
                                         {% endif %}
                                     </div>
                                 </td>
@@ -252,26 +256,16 @@
                                            min="1" step="1" placeholder="10" required>
                                     <div class="form-text">总共执行多少轮交易</div>
                                 </div>
-                                <div class="col-md-6 mb-3">
-                                    <label for="taskLeverage" class="form-label">杠杆倍数</label>
-                                    <select class="form-select" id="taskLeverage" name="leverage">
-                                        <option value="1">1x (现货)</option>
+                                <div class="col-md-6 mb-3" id="taskLeverageContainer">
+                                    <label for="taskLeverage" class="form-label">杠杆倍数 <span class="text-danger">*</span></label>
+                                    <select class="form-select" id="taskLeverage" name="leverage" required>
                                         <option value="5">5x</option>
                                         <option value="10">10x</option>
-                                        <option value="20">20x</option>
+                                        <option value="20" selected>20x</option>
                                         <option value="50">50x</option>
                                         <option value="100">100x</option>
                                     </select>
-                                    <div class="form-text">仅合约交易需要设置杠杆倍数</div>
-                                </div>
-                                <div class="col-md-6 mb-3" id="taskSideContainer" style="display: none;">
-                                    <label for="taskSide" class="form-label">交易方向</label>
-                                    <select class="form-select" id="taskSide" name="side">
-                                        <option value="buy">买入</option>
-                                        <option value="sell">卖出</option>
-                                        <option value="both">双向交易</option>
-                                    </select>
-                                    <div class="form-text">选择交易方向</div>
+                                    <div class="form-text">合约交易杠杆倍数</div>
                                 </div>
                             </div>
                         </div>
@@ -379,26 +373,16 @@
                                            min="1" step="1" placeholder="10" required>
                                     <div class="form-text">总共执行多少轮交易</div>
                                 </div>
-                                <div class="col-md-6 mb-3">
-                                    <label for="editTaskLeverage" class="form-label">杠杆倍数</label>
-                                    <select class="form-select" id="editTaskLeverage" name="leverage">
-                                        <option value="1">1x (现货)</option>
+                                <div class="col-md-6 mb-3" id="editTaskLeverageContainer">
+                                    <label for="editTaskLeverage" class="form-label">杠杆倍数 <span class="text-danger">*</span></label>
+                                    <select class="form-select" id="editTaskLeverage" name="leverage" required>
                                         <option value="5">5x</option>
                                         <option value="10">10x</option>
-                                        <option value="20">20x</option>
+                                        <option value="20" selected>20x</option>
                                         <option value="50">50x</option>
                                         <option value="100">100x</option>
                                     </select>
-                                    <div class="form-text">仅合约交易需要设置杠杆倍数</div>
-                                </div>
-                                <div class="col-md-6 mb-3" id="editTaskSideContainer" style="display: none;">
-                                    <label for="editTaskSide" class="form-label">交易方向</label>
-                                    <select class="form-select" id="editTaskSide" name="side">
-                                        <option value="buy">买入</option>
-                                        <option value="sell">卖出</option>
-                                        <option value="both">双向交易</option>
-                                    </select>
-                                    <div class="form-text">选择交易方向</div>
+                                    <div class="form-text">合约交易杠杆倍数</div>
                                 </div>
                             </div>
                         </div>
@@ -466,50 +450,63 @@ $(document).ready(function() {
     });
     
     // 根据钱包类型显示/隐藏杠杆字段
-    function toggleLeverageField() {
-        const selectedWallet = $('#taskWallet option:selected, #editTaskWallet option:selected');
+    function toggleLeverageField(context) {
+        let walletSelector, leverageContainer;
+        
+        if (context === 'edit') {
+            walletSelector = '#editTaskWallet';
+            leverageContainer = '#editTaskLeverageContainer';
+        } else {
+            walletSelector = '#taskWallet';
+            leverageContainer = '#taskLeverageContainer';
+        }
+        
+        const selectedWallet = $(walletSelector + ' option:selected');
         const walletType = selectedWallet.data('type');
         
         if (walletType === 'futures') {
-            // 合约交易显示杠杆字段
-            $('[id*="Leverage"]').closest('.mb-3').show();
+            // 合约交易：显示杠杆字段并设为必填
+            $(leverageContainer).show();
+            $(leverageContainer).find('select').prop('required', true);
+        } else if (walletType === 'spot') {
+            // 现货交易：完全隐藏杠杆字段并设为默认值1
+            $(leverageContainer).hide();
+            $(leverageContainer).find('select').prop('required', false).val(1);
         } else {
-            // 现货交易隐藏杠杆字段并设为1
-            $('[id*="Leverage"]').closest('.mb-3').hide();
-            $('[id*="Leverage"]').val(1);
+            // 未选择钱包时隐藏
+            $(leverageContainer).hide();
+            $(leverageContainer).find('select').prop('required', false);
         }
     }
     
     // 钱包选择变化时更新杠杆字段显示状态
-    $('#taskWallet, #editTaskWallet').on('change', toggleLeverageField);
-    
-    // 策略选择变化时更新字段显示
-    function updateFieldsBasedOnStrategy(strategySelector, leverageSelector, sideSelector) {
-        const selectedStrategy = $(strategySelector + ' option:selected');
-        const strategyType = selectedStrategy.closest('option').text();
-        
-        // 根据策略类型决定是否显示交易方向字段
-        if (strategyType.includes('volume') || strategyType.includes('hidden')) {
-            // 现货刷量策略和合约HIDDEN策略不需要选择交易方向
-            $(sideSelector).hide();
-            $(sideSelector.replace('Container', '')).val('both'); // 设为默认值
-        } else {
-            // 其他策略类型显示交易方向选择
-            $(sideSelector).show();
-        }
-    }
-    
-    $('#taskStrategy').on('change', function() {
-        updateFieldsBasedOnStrategy('#taskStrategy', '#taskLeverageContainer', '#taskSideContainer');
+    $('#taskWallet').on('change', function() {
+        toggleLeverageField('create');
     });
     
-    $('#editTaskStrategy').on('change', function() {
-        updateFieldsBasedOnStrategy('#editTaskStrategy', '#editTaskLeverageContainer', '#editTaskSideContainer');
+    $('#editTaskWallet').on('change', function() {
+        toggleLeverageField('edit');
     });
+    
+    // 页面加载时初始化杠杆字段状态
+    toggleLeverageField('create');
+    toggleLeverageField('edit');
+    
+    // 移除了策略选择变化时的交易方向字段更新逻辑
+    // 交易方向由策略内部决定，不需要用户选择
     
     // 提交任务表单
     $('#createTaskForm').on('submit', function(e) {
         e.preventDefault();
+        
+        // 根据钱包类型确定杠杆值
+        const selectedWallet = $('#taskWallet option:selected');
+        const walletType = selectedWallet.data('type');
+        let leverage = 1; // 现货默认值
+        
+        if (walletType === 'futures') {
+            leverage = $('#taskLeverage').val();
+        }
         
         const formData = {
             name: $('#taskName').val(),
@@ -520,8 +517,8 @@ $(document).ready(function() {
             quantity: $('#taskQuantity').val(),
             interval: $('#taskInterval').val(),
             rounds: $('#taskRounds').val(),
-            leverage: $('#taskLeverage').val(),
-            side: $('#taskSide').val() || 'both',  // 默认为双向交易
+            leverage: leverage,
+            side: 'both',  // 固定为双向交易，由策略内部决定具体方向
             order_type: 'market'  // 暂时固定为市价单
         };
         
@@ -547,6 +544,15 @@ $(document).ready(function() {
     $('#editTaskForm').on('submit', function(e) {
         e.preventDefault();
         
+        // 根据钱包类型确定杠杆值
+        const selectedEditWallet = $('#editTaskWallet option:selected');
+        const editWalletType = selectedEditWallet.data('type');
+        let editLeverage = 1; // 现货默认值
+        
+        if (editWalletType === 'futures') {
+            editLeverage = $('#editTaskLeverage').val();
+        }
+        
         const formData = {
             name: $('#editTaskName').val(),
             description: $('#editTaskDescription').val(),
@@ -556,8 +562,8 @@ $(document).ready(function() {
             quantity: $('#editTaskQuantity').val(),
             interval: $('#editTaskInterval').val(),
             rounds: $('#editTaskRounds').val(),
-            leverage: $('#editTaskLeverage').val(),
-            side: $('#editTaskSide').val() || 'both',  // 默认为双向交易
+            leverage: editLeverage,
+            side: 'both',  // 固定为双向交易，由策略内部决定具体方向
             order_type: 'market'
         };
         
@@ -789,14 +795,22 @@ function populateEditForm(task) {
     $('#editTaskStrategy').val(task.strategy.id);
     $('#editTaskId').val(task.id);
     
+    // 触发钱包选择变化事件以更新杠杆字段显示
+    $('#editTaskWallet').trigger('change');
+    
     // 填充交易参数
     const params = task.parameters || {};
     $('#editTaskSymbol').val(params.symbol || task.symbol || '');
     $('#editTaskQuantity').val(params.quantity || task.quantity || '');
     $('#editTaskInterval').val(params.interval || task.interval || '');
     $('#editTaskRounds').val(params.rounds || task.rounds || '');
-    $('#editTaskLeverage').val(params.leverage || task.leverage || 1);
-    $('#editTaskSide').val(params.side || task.side || 'buy');
+    
+    // 根据钱包类型处理杠杆字段
+    if (task.wallet.wallet_type === 'futures') {
+        $('#editTaskLeverage').val(params.leverage || task.leverage || 20);
+    }
+    // 现货钱包的杠杆值会自动设为1，无需手动设置
+    // 交易方向由策略内部决定，不需要用户编辑
 }
 
 // 删除任务

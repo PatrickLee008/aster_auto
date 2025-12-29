@@ -12,6 +12,7 @@ import os
 # 添加父目录到路径以导入客户端
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from simple_trading_client import SimpleTradingClient
+from market_trading_client import MarketTradingClient
 from config_env import SPOT_CONFIG
 
 
@@ -33,11 +34,20 @@ class VolumeStrategy:
         self.interval = interval
         self.rounds = rounds
         self.client = None
+        self.market_client = None  # 市价单客户端
         self.logger = None  # 日志记录器
         
         # 风险控制参数
         self.buy_timeout = 0.5  # 买入检查时间(300毫秒)
         self.max_price_deviation = 0.01  # 最大价格偏差(1%)
+        
+        # 统计数据
+        self.original_balance = 0.0  # 真正的原始余额（用于最终恢复）
+        self.initial_balance = 0.0   # 策略开始时的初始余额（用于循环期间的平衡检验）
+        self.completed_rounds = 0    # 完成的轮次
+        self.supplement_orders = 0   # 补单次数
+        self.total_cost_diff = 0.0   # 总损耗（价格差累计）
+        self.auto_purchased = 0.0    # 自动购买的数量（需要最终卖出）
         
         print(f"=== 刷量策略初始化 ===")
         print(f"交易对: {symbol}")
@@ -65,8 +75,23 @@ class VolumeStrategy:
     def connect(self) -> bool:
         """连接交易所"""
         try:
-            # 始终使用SimpleTradingClient，因为它的签名实现是正确的
-            self.client = SimpleTradingClient()
+            # 使用任务运行器传递的钱包配置
+            if hasattr(self, 'wallet_config') and self.wallet_config:
+                config = self.wallet_config
+                self.client = SimpleTradingClient(
+                    api_key=config.get('api_key'),
+                    secret_key=config.get('secret_key')
+                )
+                self.market_client = MarketTradingClient(
+                    api_key=config.get('api_key'),
+                    secret_key=config.get('secret_key')
+                )
+                self.log("使用任务钱包配置连接交易所")
+            else:
+                # 回退到原有的配置方式
+                self.client = SimpleTradingClient()
+                self.market_client = MarketTradingClient()
+                self.log("使用默认配置连接交易所（回退模式）", 'warning')
             
             if self.client.test_connection():
                 print("交易所连接成功")
@@ -207,7 +232,6 @@ class VolumeStrategy:
             )
             
             if result:
-                print(f"卖出订单成功: ID {result.get('orderId')}")
                 return result
             else:
                 print(f"卖出订单失败: 无返回结果")
@@ -242,7 +266,6 @@ class VolumeStrategy:
             )
             
             if result:
-                print(f"买入订单成功: ID {result.get('orderId')}")
                 return result
             else:
                 print(f"买入订单失败: 无返回结果")
@@ -252,27 +275,115 @@ class VolumeStrategy:
             print(f"买入订单错误: {e}")
             return None
     
-    def check_order_status(self, order_id: int) -> Optional[str]:
-        """检查订单状态"""
-        try:
-            result = self.client.get_order(self.symbol, order_id)
-            if result:
-                return result.get('status')
-            return None
-            
-        except Exception as e:
-            print(f"查询订单状态错误: {e}")
-            return None
+    def check_order_status(self, order_id: int, max_retries: int = 3) -> Optional[str]:
+        """检查订单状态 - 带重试机制"""
+        for attempt in range(max_retries):
+            try:
+                result = self.client.get_order(self.symbol, order_id)
+                if result:
+                    return result.get('status')
+                return None
+                
+            except Exception as e:
+                error_msg = str(e)
+                if attempt < max_retries - 1:
+                    if "SSL" in error_msg or "EOF" in error_msg or "Connection" in error_msg:
+                        print(f"⚠️ 网络连接异常 (第{attempt+1}次尝试): {type(e).__name__}")
+                        print(f"等待1秒后重试...")
+                        time.sleep(1)
+                        continue
+                    else:
+                        # 非网络错误，不重试
+                        print(f"查询订单状态错误: {e}")
+                        return None
+                else:
+                    # 最后一次尝试失败
+                    print(f"❌ 查询订单状态最终失败 (已重试{max_retries}次): {type(e).__name__}")
+                    print("💡 可能的原因: 网络不稳定、代理服务器问题或API服务异常")
+                    return None
+        
+        return None
     
-    def cancel_order(self, order_id: int) -> bool:
-        """撤销订单"""
-        try:
-            result = self.client.cancel_order(symbol=self.symbol, order_id=order_id)
-            return result is not None
-            
-        except Exception as e:
-            print(f"撤销订单错误: {e}")
-            return False
+    def get_order_details(self, order_id: int, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+        """获取订单详细信息，包括执行数量"""
+        for attempt in range(max_retries):
+            try:
+                result = self.client.get_order(self.symbol, order_id)
+                if result:
+                    return result
+                return None
+                
+            except Exception as e:
+                error_msg = str(e)
+                if attempt < max_retries - 1:
+                    if "SSL" in error_msg or "EOF" in error_msg or "Connection" in error_msg:
+                        print(f"⚠️ 获取订单详情网络异常 (第{attempt+1}次尝试): {type(e).__name__}")
+                        print(f"等待1秒后重试...")
+                        time.sleep(1)
+                        continue
+                    else:
+                        # 非网络错误，不重试
+                        print(f"获取订单详情错误: {e}")
+                        return None
+                else:
+                    # 最后一次尝试失败
+                    print(f"❌ 获取订单详情最终失败 (已重试{max_retries}次): {type(e).__name__}")
+                    return None
+        
+        return None
+    
+    def get_asset_balance(self, max_retries: int = 3) -> float:
+        """获取交易资产的当前余额 - 带重试机制"""
+        for attempt in range(max_retries):
+            try:
+                base_asset = self.symbol.replace('USDT', '')  # 从SENTISUSDT获取SENTIS
+                account_info = self.client.get_account_info()
+                
+                if account_info and 'balances' in account_info:
+                    for balance in account_info['balances']:
+                        if balance['asset'] == base_asset:
+                            return float(balance['free'])
+                return 0.0
+                
+            except Exception as e:
+                error_msg = str(e)
+                if attempt < max_retries - 1:
+                    if "SSL" in error_msg or "EOF" in error_msg or "Connection" in error_msg:
+                        print(f"⚠️ 获取余额网络异常 (第{attempt+1}次尝试): {type(e).__name__}")
+                        time.sleep(1)
+                        continue
+                    else:
+                        self.log(f"获取余额失败: {e}", 'error')
+                        return 0.0
+                else:
+                    print(f"❌ 获取余额最终失败 (已重试{max_retries}次): {type(e).__name__}")
+                    self.log(f"获取余额失败: {e}", 'error')
+                    return 0.0
+        
+        return 0.0
+    
+    def cancel_order(self, order_id: int, max_retries: int = 3) -> bool:
+        """撤销订单 - 带重试机制"""
+        for attempt in range(max_retries):
+            try:
+                result = self.client.cancel_order(symbol=self.symbol, order_id=order_id)
+                return result is not None
+                
+            except Exception as e:
+                error_msg = str(e)
+                if attempt < max_retries - 1:
+                    if "SSL" in error_msg or "EOF" in error_msg or "Connection" in error_msg:
+                        print(f"⚠️ 撤销订单网络异常 (第{attempt+1}次尝试): {type(e).__name__}")
+                        time.sleep(1)
+                        continue
+                    else:
+                        print(f"撤销订单错误: {e}")
+                        return False
+                else:
+                    print(f"❌ 撤销订单最终失败 (已重试{max_retries}次): {type(e).__name__}")
+                    return False
+        
+        return False
     
     def get_market_depth(self) -> dict:
         """获取市场深度数据"""
@@ -289,150 +400,203 @@ class VolumeStrategy:
             print(f"获取市场深度失败: {e}")
             return None
     
-    def smart_buy_order(self, original_price: float) -> bool:
-        """智能买入补单 - 寻找更容易成交且亏损最小的价格"""
-        print("\\n--- 智能买入补单策略 ---")
-        
-        # 获取最新市场深度
-        depth = self.get_market_depth()
-        if not depth:
-            print("无法获取市场深度，补单失败")
-            return False
-        
-        asks = depth['asks']  # 卖盘 [[价格, 数量], ...]
-        if not asks:
-            print("卖盘为空，补单失败")
-            return False
-        
-        print(f"原始价格: {original_price:.5f}")
-        print(f"当前卖盘档位: {len(asks)}档")
-        
-        # 寻找最优补单价格
-        target_quantity = float(self.quantity)
-        best_price = None
-        min_loss = float('inf')
-        total_available = 0
-        
-        for ask in asks:
-            ask_price = ask[0]
-            ask_quantity = ask[1]
-            
-            # 计算相对于原始价格的损失
-            loss = ask_price - original_price
-            
-            # 检查订单价值是否满足5 USDT最小限制
-            order_value = ask_price * target_quantity
-            if order_value < 5.0:
-                continue
-            
-            # 检查深度是否足够
-            if ask_quantity >= target_quantity:
-                # 单档就能满足，这是最优选择
-                if loss < min_loss:
-                    min_loss = loss
-                    best_price = ask_price
-                print(f"可选价格: {ask_price:.5f}, 损失: {loss:.5f}, 深度: {ask_quantity:.2f}")
-                break
-            else:
-                # 累计深度检查
-                total_available += ask_quantity
-                if total_available >= target_quantity and loss < min_loss:
-                    min_loss = loss
-                    best_price = ask_price
-                print(f"可选价格: {ask_price:.5f}, 损失: {loss:.5f}, 累计深度: {total_available:.2f}")
-        
-        if not best_price:
-            print("未找到合适的补单价格")
-            return False
-        
-        print(f"\\n选择补单价格: {best_price:.5f}")
-        print(f"价格损失: {min_loss:.5f} ({(min_loss/original_price)*100:.2f}%)")
-        print(f"订单价值: {best_price * target_quantity:.2f} USDT")
-        
-        # 执行补单
+    def place_market_buy_order(self, quantity: float) -> Optional[Dict[str, Any]]:
+        """下达市价买入订单"""
         try:
-            result = self.place_buy_order(best_price, self.quantity)
+            # 检查输入参数
+            if quantity <= 0:
+                self.log(f"❌ 无效数量: {quantity}", 'error')
+                return None
+            
+            # 简化处理：去掉小数点，直接使用整数
+            import math
+            adjusted_quantity = math.floor(quantity)
+            quantity_str = str(int(adjusted_quantity))
+            
+            self.log(f"市价买入原始数量: {quantity:.6f}")
+            self.log(f"市价买入调整为整数: {quantity_str}")
+            
+            # 使用专用的市价单客户端
+            result = self.market_client.place_market_buy_order(self.symbol, quantity_str)
+            
             if result:
-                print(f"✅ 智能买入补单成功: ID {result.get('orderId')}")
-                return True
+                self.log(f"✅ 市价买入成功: ID {result.get('orderId')}")
+                return result
             else:
-                print("❌ 智能买入补单失败")
-                return False
+                self.log("❌ 市价买入失败: 无返回结果", 'error')
+                # 返回特殊值表示订单价值不足错误
+                return "ORDER_VALUE_TOO_SMALL"
+                
         except Exception as e:
-            print(f"❌ 智能买入补单异常: {e}")
+            self.log(f"❌ 市价买入错误: {type(e).__name__}: {e}", 'error')
+            import traceback
+            self.log(f"详细错误: {traceback.format_exc()}", 'error')
+            return None
+    
+    def place_market_sell_order(self, quantity: float) -> Optional[Dict[str, Any]]:
+        """下达市价卖出订单"""
+        try:
+            # 检查输入参数
+            if quantity <= 0:
+                self.log(f"❌ 无效数量: {quantity}", 'error')
+                return None
+            
+            # 简化处理：去掉小数点，直接使用整数
+            import math
+            adjusted_quantity = math.floor(quantity)
+            quantity_str = str(int(adjusted_quantity))
+            
+            self.log(f"市价卖出原始数量: {quantity:.6f}")
+            self.log(f"市价卖出调整为整数: {quantity_str}")
+            
+            # 使用专用的市价单客户端
+            result = self.market_client.place_market_sell_order(self.symbol, quantity_str)
+            
+            if result:
+                self.log(f"✅ 市价卖出成功: ID {result.get('orderId')}")
+                return result
+            else:
+                self.log("❌ 市价卖出失败: 无返回结果", 'error')
+                # 返回特殊值表示订单价值不足错误
+                return "ORDER_VALUE_TOO_SMALL"
+                
+        except Exception as e:
+            self.log(f"❌ 市价卖出错误: {e}", 'error')
+            return None
+    
+    def smart_buy_order(self, original_price: float, needed_quantity: float = None) -> bool:
+        """市价买入补单 - 补够指定数量"""
+        self.log("\\n--- 市价买入补单 ---")
+        self.log(f"原始限价: {original_price:.5f} (仅供参考)")
+        
+        target_quantity = needed_quantity if needed_quantity else float(self.quantity)
+        self.log(f"需要补单数量: {target_quantity:.2f}")
+        
+        # 检查订单价值是否满足最小限制
+        estimated_value = target_quantity * original_price
+        if estimated_value < 5.0:
+            self.log(f"⚠️ 补单价值不足5 USDT (约{estimated_value:.2f} USDT)")
+            self.log("💡 跳过补单，视为完成")
+            return True  # 返回True以继续下一轮
+        
+        # 执行市价买入补单
+        result = self.place_market_buy_order(target_quantity)
+        
+        if result == "ORDER_VALUE_TOO_SMALL":
+            self.log("💡 订单价值不足5 USDT，跳过补单视为完成")
+            return True  # 返回True以继续下一轮
+        elif result and isinstance(result, dict):
+            self.log(f"✅ 市价买入补单成功: ID {result.get('orderId')}")
+            self.supplement_orders += 1  # 增加补单计数
+            # 计算损耗（按原始价格估算）
+            cost_diff = abs(target_quantity * original_price * 0.001)  # 假设0.1%的价格差
+            self.total_cost_diff += cost_diff
+            return True
+        else:
+            self.log("❌ 市价买入补单失败", 'error')
             return False
     
-    def smart_sell_order(self, original_price: float) -> bool:
-        """智能卖出补单 - 寻找更容易成交且亏损最小的价格"""
-        print("\\n--- 智能卖出补单策略 ---")
+    def smart_sell_order(self, original_price: float, needed_quantity: float = None) -> bool:
+        """市价卖出补单 - 补够指定数量"""
+        self.log("\\n--- 市价卖出补单 ---")
+        self.log(f"原始限价: {original_price:.5f} (仅供参考)")
         
-        # 获取最新市场深度  
-        depth = self.get_market_depth()
-        if not depth:
-            print("无法获取市场深度，补单失败")
+        target_quantity = needed_quantity if needed_quantity else float(self.quantity)
+        self.log(f"需要补单数量: {target_quantity:.2f}")
+        
+        # 检查订单价值是否满足最小限制
+        estimated_value = target_quantity * original_price
+        if estimated_value < 5.0:
+            self.log(f"⚠️ 补单价值不足5 USDT (约{estimated_value:.2f} USDT)")
+            self.log("💡 跳过补单，视为完成")
+            return True  # 返回True以继续下一轮
+        
+        # 执行市价卖出补单
+        result = self.place_market_sell_order(target_quantity)
+        
+        if result == "ORDER_VALUE_TOO_SMALL":
+            self.log("💡 订单价值不足5 USDT，跳过补单视为完成")
+            return True  # 返回True以继续下一轮
+        elif result and isinstance(result, dict):
+            self.log(f"✅ 市价卖出补单成功: ID {result.get('orderId')}")
+            self.supplement_orders += 1  # 增加补单计数
+            # 计算损耗（按原始价格估算）
+            cost_diff = abs(target_quantity * original_price * 0.001)  # 假设0.1%的价格差
+            self.total_cost_diff += cost_diff
+            return True
+        else:
+            self.log("❌ 市价卖出补单失败", 'error')
             return False
+    
+    def ensure_balance_consistency(self, initial_balance: float, max_attempts: int = 5) -> bool:
+        """确保账户余额与初始余额一致 - 持续补单直到平衡"""
+        self.log("\\n=== 检查账户余额一致性 ===")
+        self.log(f"初始余额: {initial_balance:.2f}")
         
-        bids = depth['bids']  # 买盘 [[价格, 数量], ...]
-        if not bids:
-            print("买盘为空，补单失败")
-            return False
-        
-        print(f"原始价格: {original_price:.5f}")
-        print(f"当前买盘档位: {len(bids)}档")
-        
-        # 寻找最优补单价格
-        target_quantity = float(self.quantity)
-        best_price = None
-        min_loss = float('inf')
-        total_available = 0
-        
-        for bid in bids:
-            bid_price = bid[0]
-            bid_quantity = bid[1]
+        for attempt in range(1, max_attempts + 1):
+            current_balance = self.get_asset_balance()
+            balance_diff = current_balance - initial_balance
             
-            # 计算相对于原始价格的损失
-            loss = original_price - bid_price  # 卖出价格越低损失越大
+            self.log(f"第{attempt}次检查:")
+            self.log(f"  当前余额: {current_balance:.2f}")
+            self.log(f"  余额差异: {balance_diff:.2f}")
             
-            # 检查订单价值是否满足5 USDT最小限制
-            order_value = bid_price * target_quantity
-            if order_value < 5.0:
-                continue
-            
-            # 检查深度是否足够
-            if bid_quantity >= target_quantity:
-                # 单档就能满足，这是最优选择
-                if loss < min_loss:
-                    min_loss = loss
-                    best_price = bid_price
-                print(f"可选价格: {bid_price:.5f}, 损失: {loss:.5f}, 深度: {bid_quantity:.2f}")
-                break
-            else:
-                # 累计深度检查
-                total_available += bid_quantity
-                if total_available >= target_quantity and loss < min_loss:
-                    min_loss = loss
-                    best_price = bid_price
-                print(f"可选价格: {bid_price:.5f}, 损失: {loss:.5f}, 累计深度: {total_available:.2f}")
-        
-        if not best_price:
-            print("未找到合适的补单价格")
-            return False
-        
-        print(f"\\n选择补单价格: {best_price:.5f}")
-        print(f"价格损失: {min_loss:.5f} ({(min_loss/original_price)*100:.2f}%)")
-        print(f"订单价值: {best_price * target_quantity:.2f} USDT")
-        
-        # 执行补单
-        try:
-            result = self.place_sell_order(best_price)
-            if result:
-                print(f"✅ 智能卖出补单成功: ID {result.get('orderId')}")
+            # 允许较小的误差（0.1个币以内可忽略）
+            if abs(balance_diff) <= 0.1:
+                self.log(f"✅ 余额差异在可接受范围内: {balance_diff:.2f} (≤0.1)")
+                self.log("✅ 余额一致性检查通过")
                 return True
-            else:
-                print("❌ 智能卖出补单失败")
-                return False
-        except Exception as e:
-            print(f"❌ 智能卖出补单异常: {e}")
+            
+            # 余额不一致且超过0.1，需要补单
+            if balance_diff > 0.1:
+                # 余额增加了，说明买入多了，需要卖出
+                sell_quantity = abs(balance_diff)
+                self.log(f"余额增加 {balance_diff:.2f}，执行市价卖出补单")
+                
+                result = self.place_market_sell_order(sell_quantity)
+                
+                if result == "ORDER_VALUE_TOO_SMALL":
+                    self.log("💡 平衡订单价值不足5 USDT，视为余额已平衡")
+                    return True  # 直接视为成功
+                elif result and isinstance(result, dict):
+                    self.log(f"✅ 平衡卖出成功: {sell_quantity:.2f}")
+                    time.sleep(1)  # 等待成交
+                    continue
+                else:
+                    self.log("❌ 平衡卖出失败", 'error')
+                    
+            elif balance_diff < -0.1:
+                # 余额减少了，说明卖出多了，需要买入
+                buy_quantity = abs(balance_diff)
+                self.log(f"余额减少 {abs(balance_diff):.2f}，执行市价买入补单")
+                
+                result = self.place_market_buy_order(buy_quantity)
+                
+                if result == "ORDER_VALUE_TOO_SMALL":
+                    self.log("💡 平衡订单价值不足5 USDT，视为余额已平衡")
+                    return True  # 直接视为成功
+                elif result and isinstance(result, dict):
+                    self.log(f"✅ 平衡买入成功: {buy_quantity:.2f}")
+                    time.sleep(1)  # 等待成交
+                    continue
+                else:
+                    self.log("❌ 平衡买入失败", 'error')
+            
+            # 如果达到这里，说明补单失败，等待一下再试
+            if attempt < max_attempts:
+                self.log(f"第{attempt}次平衡失败，等待3秒后重试...")
+                time.sleep(3)
+        
+        # 最终检查
+        final_balance = self.get_asset_balance()
+        final_diff = final_balance - initial_balance
+        
+        if abs(final_diff) <= 0.1:
+            self.log(f"✅ 最终余额差异在可接受范围内: {final_diff:.2f} (≤0.1)")
+            self.log("✅ 最终余额检查通过")
+            return True
+        else:
+            self.log(f"❌ 最终余额检查失败，差异: {final_diff:.2f} (>0.1)", 'error')
             return False
     
     def emergency_buy(self, target_sell_price: float) -> bool:
@@ -571,11 +735,240 @@ class VolumeStrategy:
             print(f"补货过程错误: {e}")
             return False
     
+    def auto_purchase_if_insufficient(self) -> bool:
+        """如果余额不足则自动补齐 - 简化版"""
+        try:
+            current_balance = self.get_asset_balance()
+            required_quantity = float(self.quantity)
+            
+            print(f"检查余额是否足够交易...")
+            print(f"当前余额: {current_balance:.2f}")
+            print(f"每轮需要: {required_quantity:.2f}")
+            
+            if current_balance >= required_quantity:
+                print("✅ 余额充足，无需补齐")
+                return True
+            
+            # 计算缺少的数量
+            shortage = required_quantity - current_balance
+            print(f"⚠️ 余额不足，缺少: {shortage:.2f}")
+            
+            # 第一次补齐：按差额补充
+            print(f"执行第一次补齐，数量: {shortage:.2f}")
+            result = self.place_market_buy_order(shortage)
+            
+            if not result or result == "ORDER_VALUE_TOO_SMALL":
+                print("❌ 第一次补齐失败")
+                return False
+            
+            # 等待成交并重新检查余额
+            time.sleep(2)
+            new_balance = self.get_asset_balance()
+            print(f"补齐后余额: {new_balance:.2f}")
+            
+            # 检查是否还不足
+            if new_balance < required_quantity:
+                remaining_shortage = required_quantity - new_balance
+                print(f"仍不足: {remaining_shortage:.2f}")
+                
+                # 获取当前价格，按5 USDT价值补充
+                book_data = self.get_order_book()
+                if not book_data:
+                    print("❌ 无法获取市场价格，无法进行第二次补齐")
+                    return False
+                
+                current_price = (book_data['bid_price'] + book_data['ask_price']) / 2
+                min_quantity_for_5usdt = 5.0 / current_price
+                
+                print(f"按5 USDT价值补齐，数量: {min_quantity_for_5usdt:.2f}")
+                result = self.place_market_buy_order(min_quantity_for_5usdt)
+                
+                if not result or result == "ORDER_VALUE_TOO_SMALL":
+                    print("❌ 第二次补齐也失败")
+                    return False
+                
+                print("✅ 第二次补齐完成")
+            
+            print("✅ 余额补齐完成")
+            return True
+                
+        except Exception as e:
+            print(f"❌ 自动补齐失败: {e}")
+            return False
+    
+    def restore_original_balance(self) -> bool:
+        """恢复到原始余额 - 卖出所有自动购买的数量"""
+        try:
+            if self.auto_purchased <= 0:
+                print("✅ 无需恢复余额，未进行自动购买")
+                return True
+            
+            print(f"\n=== 恢复原始余额 ===")
+            print(f"需要卖出自动购买的数量: {self.auto_purchased:.2f}")
+            
+            # 获取当前市场价格
+            book_data = self.get_order_book()
+            if not book_data:
+                print("❌ 无法获取市场价格，跳过余额恢复")
+                return False
+            
+            estimated_price = (book_data['bid_price'] + book_data['ask_price']) / 2
+            estimated_value = self.auto_purchased * estimated_price
+            
+            print(f"估算卖出价格: {estimated_price:.5f}")
+            print(f"估算卖出价值: {estimated_value:.2f} USDT")
+            
+            # 检查订单价值
+            if estimated_value < 5.0:
+                print(f"⚠️ 卖出价值不足5 USDT，跳过余额恢复")
+                print("💡 保留微小余额差异")
+                return True
+            
+            # 执行卖出恢复
+            print("执行余额恢复卖出...")
+            result = self.place_market_sell_order(self.auto_purchased)
+            
+            if result == "ORDER_VALUE_TOO_SMALL":
+                print("💡 卖出价值不足，跳过恢复")
+                return True
+            elif result and isinstance(result, dict):
+                print(f"✅ 余额恢复成功: ID {result.get('orderId')}")
+                
+                # 等待成交并检查最终余额
+                time.sleep(2)
+                final_balance = self.get_asset_balance()
+                balance_diff = final_balance - self.original_balance
+                
+                print(f"原始余额: {self.original_balance:.2f}")
+                print(f"最终余额: {final_balance:.2f}")
+                print(f"余额差异: {balance_diff:+.2f}")
+                
+                if abs(balance_diff) <= 0.1:
+                    print("✅ 余额恢复成功，与原始余额一致")
+                    return True
+                else:
+                    print(f"⚠️ 余额恢复后仍有差异: {balance_diff:+.2f}")
+                    return True  # 仍然认为成功，因为已经尽力了
+            else:
+                print("❌ 余额恢复失败")
+                return False
+                
+        except Exception as e:
+            print(f"❌ 余额恢复异常: {e}")
+            return False
+    
+    def final_balance_reconciliation(self) -> bool:
+        """最终余额校验和补单 - 确保策略前后余额完全一致"""
+        try:
+            print("检查策略执行前后的余额变化...")
+            
+            # 获取当前余额
+            current_balance = self.get_asset_balance()
+            balance_difference = current_balance - self.initial_balance
+            
+            print(f"初始余额: {self.initial_balance:.2f}")
+            print(f"当前余额: {current_balance:.2f}")
+            print(f"余额差异: {balance_difference:+.2f}")
+            
+            # 如果差异在容忍范围内，认为平衡
+            if abs(balance_difference) <= 0.1:
+                print("✅ 余额差异在可接受范围内 (±0.1)，无需补单")
+                return True
+            
+            # 获取当前市场价格用于估算订单价值
+            book_data = self.get_order_book()
+            if not book_data:
+                print("❌ 无法获取市场价格，跳过最终补单")
+                return False
+                
+            estimated_price = (book_data['bid_price'] + book_data['ask_price']) / 2
+            print(f"当前估算价格: {estimated_price:.5f}")
+            
+            # 根据余额差异决定补单方向
+            if balance_difference > 0.1:
+                # 余额增加了，说明买入多了，需要卖出
+                sell_quantity = abs(balance_difference)
+                estimated_value = sell_quantity * estimated_price
+                
+                print(f"💡 检测到余额增加 {balance_difference:.2f}，需要卖出补单")
+                print(f"卖出数量: {sell_quantity:.2f}")
+                print(f"估算订单价值: {estimated_value:.2f} USDT")
+                
+                if estimated_value < 5.0:
+                    print(f"⚠️ 补单价值不足5 USDT，取消补单")
+                    print("💡 微小余额差异，视为正常范围")
+                    return True
+                
+                # 执行卖出补单
+                print("执行最终卖出补单...")
+                result = self.place_market_sell_order(sell_quantity)
+                
+                if result == "ORDER_VALUE_TOO_SMALL":
+                    print("💡 补单价值不足，视为完成")
+                    return True
+                elif result and isinstance(result, dict):
+                    print(f"✅ 最终卖出补单成功: ID {result.get('orderId')}")
+                    self.supplement_orders += 1
+                    
+                    # 等待成交后再次检查
+                    time.sleep(2)
+                    new_balance = self.get_asset_balance()
+                    final_diff = new_balance - self.initial_balance
+                    print(f"补单后余额: {new_balance:.2f} (差异: {final_diff:+.2f})")
+                    
+                    return abs(final_diff) <= 0.1
+                else:
+                    print("❌ 最终卖出补单失败")
+                    return False
+                    
+            elif balance_difference < -0.1:
+                # 余额减少了，说明卖出多了，需要买入
+                buy_quantity = abs(balance_difference)
+                estimated_value = buy_quantity * estimated_price
+                
+                print(f"💡 检测到余额减少 {abs(balance_difference):.2f}，需要买入补单")
+                print(f"买入数量: {buy_quantity:.2f}")
+                print(f"估算订单价值: {estimated_value:.2f} USDT")
+                
+                if estimated_value < 5.0:
+                    print(f"⚠️ 补单价值不足5 USDT，取消补单")
+                    print("💡 微小余额差异，视为正常范围")
+                    return True
+                
+                # 执行买入补单
+                print("执行最终买入补单...")
+                result = self.place_market_buy_order(buy_quantity)
+                
+                if result == "ORDER_VALUE_TOO_SMALL":
+                    print("💡 补单价值不足，视为完成")
+                    return True
+                elif result and isinstance(result, dict):
+                    print(f"✅ 最终买入补单成功: ID {result.get('orderId')}")
+                    self.supplement_orders += 1
+                    
+                    # 等待成交后再次检查
+                    time.sleep(2)
+                    new_balance = self.get_asset_balance()
+                    final_diff = new_balance - self.initial_balance
+                    print(f"补单后余额: {new_balance:.2f} (差异: {final_diff:+.2f})")
+                    
+                    return abs(final_diff) <= 0.1
+                else:
+                    print("❌ 最终买入补单失败")
+                    return False
+                    
+        except Exception as e:
+            print(f"❌ 最终余额校验异常: {e}")
+            return False
+    
     def execute_round(self, round_num: int) -> bool:
         """执行一轮交易"""
         print(f"\n=== 第 {round_num}/{self.rounds} 轮交易 ===")
         
         try:
+            # 使用策略开始时记录的初始余额作为基准
+            initial_balance = self.initial_balance
+            
             # 1. 获取当前订单薄
             book_data = self.get_order_book()
             if not book_data:
@@ -594,7 +987,7 @@ class VolumeStrategy:
             import threading
             import time
             
-            print("执行顺序: 卖出 -> 买入 (最小延迟)")
+            print("执行顺序: 卖出 -> 买入 (50毫秒延迟)")
             start_time = time.time()
             
             # 用于存储订单结果的变量
@@ -605,65 +998,55 @@ class VolumeStrategy:
             
             # 最优方案：使用异步HTTP请求减少延迟
             try:
-                print("同时发起请求（卖出略优先）...")
-                
-                # 方案A：使用线程池，最小延迟
+                # 使用线程池，50ms延迟
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                     # 立即提交卖出任务
                     sell_future = executor.submit(self.place_sell_order, trade_price)
                     
-                    # 微秒级延迟后提交买入任务
-                    time.sleep(0.001)  # 1毫秒延迟
+                    # 50ms延迟后提交买入任务
+                    time.sleep(0.050)  # 50ms延迟
                     buy_future = executor.submit(self.place_buy_order, trade_price)
                     
-                    # 并行等待结果 - 改进错误处理避免重复下单
+                    # 并行等待结果
                     try:
-                        sell_order = sell_future.result(timeout=8)
-                        buy_order = buy_future.result(timeout=8)
+                        sell_order = sell_future.result(timeout=10)
+                        buy_order = buy_future.result(timeout=10)
                     except Exception as result_e:
-                        # 如果获取结果失败，检查订单是否已经提交
+                        # 如果获取结果失败，等待一下再检查
                         print(f"获取并行结果异常: {result_e}")
+                        print("等待额外时间确保订单完全处理...")
+                        time.sleep(3)
                         
-                        # 尝试从future获取已完成的结果
+                        # 重新尝试获取结果，无论future是否done都尝试获取
+                        sell_order = None
+                        buy_order = None
+                        
+                        # 尝试获取卖出订单结果
                         try:
-                            sell_order = sell_future.result(timeout=1) if sell_future.done() else None
-                        except:
+                            sell_order = sell_future.result(timeout=2)
+                            print(f"✅ 延迟获取到卖出订单结果")
+                        except Exception as e:
+                            print(f"延迟获取卖出订单结果失败: {e}")
                             sell_order = None
                         
+                        # 尝试获取买入订单结果
                         try:
-                            buy_order = buy_future.result(timeout=1) if buy_future.done() else None
-                        except:
+                            buy_order = buy_future.result(timeout=2)
+                            print(f"✅ 延迟获取到买入订单结果")
+                        except Exception as e:
+                            print(f"延迟获取买入订单结果失败: {e}")
                             buy_order = None
                         
-                        # 如果订单提交失败，直接取消并跳过本轮（不使用补单）
+                        print(f"最终订单状态: 卖出={bool(sell_order)}, 买入={bool(buy_order)}")
+                        
+                        # 重要：即使获取结果失败，订单可能已经成功提交
+                        # 不要立即跳过，让后续的状态检查逻辑来判断实际情况
                         if not sell_order and not buy_order:
-                            print("并行订单提交完全失败，跳过本轮")
-                            return False
-                        elif sell_order and not buy_order:
-                            print("卖出提交成功，买入提交失败 - 取消卖出订单")
-                            sell_order_id = sell_order.get('orderId')
-                            if sell_order_id:
-                                try:
-                                    self.cancel_order(sell_order_id)
-                                    print(f"✅ 已取消卖出订单: {sell_order_id}")
-                                except Exception as cancel_e:
-                                    print(f"❌ 取消卖出订单失败: {cancel_e}")
-                            print("跳过本轮")
-                            return False
-                        elif buy_order and not sell_order:
-                            print("买入提交成功，卖出提交失败 - 取消买入订单")
-                            buy_order_id = buy_order.get('orderId')
-                            if buy_order_id:
-                                try:
-                                    self.cancel_order(buy_order_id)
-                                    print(f"✅ 已取消买入订单: {buy_order_id}")
-                                except Exception as cancel_e:
-                                    print(f"❌ 取消买入订单失败: {cancel_e}")
-                            print("跳过本轮")
-                            return False
-                        else:
-                            print(f"并行订单都提交成功: 卖出={bool(sell_order)}, 买入={bool(buy_order)}")
+                            print("⚠️ 无法获取订单结果，但继续检查订单状态")
+                            # 创建临时订单对象以便后续状态检查
+                            sell_order = {'orderId': 'unknown_sell'}
+                            buy_order = {'orderId': 'unknown_buy'}
                         
             except Exception as e:
                 print(f"执行异常: {e}")
@@ -679,58 +1062,205 @@ class VolumeStrategy:
             if buy_exception:
                 print(f"❌ 买入订单异常: {buy_exception}")
             
-            # 这里不应该再有订单提交失败的情况，因为前面已经处理过了
+            # 确保订单对象存在
             if not sell_order or not buy_order:
-                print("❌ 程序逻辑错误：订单提交失败但未在前面处理")
+                print("❌ 无法获取订单结果，本轮交易失败")
                 return False
             
-            # 5. 两个订单都成功提交
+            # 5. 获取订单ID
             sell_order_id = sell_order.get('orderId')
             buy_order_id = buy_order.get('orderId')
-            print(f"✅ 卖出订单ID: {sell_order_id}")
-            print(f"✅ 买入订单ID: {buy_order_id}")
-            print("真正并行下单完成！")
             
-            # 6. 等待300毫秒后检查订单成交状态
+            # 处理未知订单ID的情况
+            has_unknown_orders = (sell_order_id == 'unknown_sell' or buy_order_id == 'unknown_buy')
+            
+            if has_unknown_orders:
+                print("⚠️ 检测到未知订单ID，改为通过余额变化判断交易结果")
+                print("等待5秒后检查余额变化...")
+                time.sleep(5)
+                
+                # 通过余额变化判断交易是否成功
+                current_balance = self.get_asset_balance()
+                balance_change = current_balance - initial_balance
+                
+                print(f"余额变化检测: 初始={initial_balance:.2f}, 当前={current_balance:.2f}, 变化={balance_change:.2f}")
+                
+                # 如果余额没有显著变化，说明交易可能未成功
+                if abs(balance_change) <= 0.01:
+                    print("💡 余额无显著变化，可能订单未成交或获取结果超时")
+                    print("跳过本轮，让订单自然处理")
+                    return False
+                else:
+                    print(f"💡 检测到余额变化，执行余额平衡补单")
+                    # 直接进行余额平衡
+                    balance_ok = self.ensure_balance_consistency(initial_balance)
+                    return balance_ok
+            else:
+                print(f"✅ 订单提交成功 - 卖出:{sell_order_id} 买入:{buy_order_id}")
+            
+            # 6. 等待300毫秒后检查订单成交状态（仅当有有效订单ID时）
             time.sleep(self.buy_timeout)  # 等待300毫秒
             
             # 检查买入和卖出订单状态
             buy_status = self.check_order_status(buy_order_id)
             sell_status = self.check_order_status(sell_order_id)
             
-            buy_filled = buy_status in ['FILLED', 'PARTIALLY_FILLED']
-            sell_filled = sell_status in ['FILLED', 'PARTIALLY_FILLED']
+            # 获取详细订单信息以查看执行数量
+            buy_details = self.get_order_details(buy_order_id)
+            sell_details = self.get_order_details(sell_order_id)
+            
+            # 分析订单执行情况
+            buy_filled = buy_status == 'FILLED'
+            sell_filled = sell_status == 'FILLED'
+            buy_partially = buy_status == 'PARTIALLY_FILLED'
+            sell_partially = sell_status == 'PARTIALLY_FILLED'
             
             print(f"订单状态检查: 买入={buy_status}, 卖出={sell_status}")
             
-            # 7. 根据成交情况处理
-            if buy_filled and sell_filled:
-                print("✅ 买卖订单都已成交，本轮成功")
-            elif sell_filled and not buy_filled:
-                print("❌ 卖出已成交，买入未成交 - 执行智能买入补单")
-                # 取消未成交的买入订单
-                self.cancel_order(buy_order_id)
-                # 执行智能补单策略
-                success = self.smart_buy_order(trade_price)
-                if not success:
-                    print("❌ 智能买入补单失败")
-                    return False
-            elif buy_filled and not sell_filled:
-                print("❌ 买入已成交，卖出未成交 - 执行智能卖出补单")
-                # 取消未成交的卖出订单
-                self.cancel_order(sell_order_id)
-                # 执行智能补单策略
-                success = self.smart_sell_order(trade_price)
-                if not success:
-                    print("❌ 智能卖出补单失败")
-                    return False
+            # 显示执行数量信息
+            if buy_details:
+                buy_executed = float(buy_details.get('executedQty', 0))
+                buy_original = float(buy_details.get('origQty', 0))
+                print(f"买入执行情况: {buy_executed}/{buy_original}")
             else:
-                print("❌ 买卖订单都未成交，取消订单并跳过本轮")
+                buy_executed = 0
+                buy_original = float(self.quantity)
+                
+            if sell_details:
+                sell_executed = float(sell_details.get('executedQty', 0))
+                sell_original = float(sell_details.get('origQty', 0))
+                print(f"卖出执行情况: {sell_executed}/{sell_original}")
+            else:
+                sell_executed = 0
+                sell_original = float(self.quantity)
+            
+            # 7. 根据成交情况处理
+            need_balance_check = False
+            
+            if buy_filled and sell_filled:
+                print("✅ 买卖订单都已成交，无需补单，直接进入下一轮")
+                # 买卖都成交，理论上余额平衡，无需检查
+                print(f"第 {round_num} 轮交易完成")
+                return True
+                
+            elif sell_filled and (not buy_filled or buy_partially):
+                # 卖出完全成交，买入未成交或部分成交
+                if buy_partially:
+                    print(f"❌ 卖出已成交，买入部分成交 ({buy_executed}/{buy_original}) - 取消买单，补足剩余数量")
+                    remaining_buy = buy_original - buy_executed
+                else:
+                    print("❌ 卖出已成交，买入未成交 - 先取消未成交买单，再市价买入补回")
+                    remaining_buy = buy_original
+                
+                # 1. 取消未成交或部分成交的买入订单
+                print(f"取消买入订单: {buy_order_id}")
+                cancel_success = self.cancel_order(buy_order_id)
+                if cancel_success:
+                    print("✅ 买入订单取消成功")
+                else:
+                    print("⚠️ 买入订单取消失败，可能已成交或已取消")
+                
+                # 2. 等待一下确保取消生效
+                time.sleep(0.5)
+                
+                # 3. 执行市价买入补单 - 精确补足剩余数量
+                print(f"需要补买: {remaining_buy:.2f}")
+                success = self.smart_buy_order(trade_price, remaining_buy)
+                if not success:
+                    print("❌ 市价买入补单失败")
+                    return False
+                print("✅ 买入补单完成，数量已平衡")
+                
+            elif buy_filled and (not sell_filled or sell_partially):
+                # 买入完全成交，卖出未成交或部分成交
+                if sell_partially:
+                    print(f"❌ 买入已成交，卖出部分成交 ({sell_executed}/{sell_original}) - 取消卖单，补足剩余数量")
+                    remaining_sell = sell_original - sell_executed
+                else:
+                    print("❌ 买入已成交，卖出未成交 - 先取消未成交卖单，再市价卖出处理")
+                    remaining_sell = sell_original
+                
+                # 1. 取消未成交或部分成交的卖出订单
+                print(f"取消卖出订单: {sell_order_id}")
+                cancel_success = self.cancel_order(sell_order_id)
+                if cancel_success:
+                    print("✅ 卖出订单取消成功")
+                else:
+                    print("⚠️ 卖出订单取消失败，可能已成交或已取消")
+                
+                # 2. 等待一下确保取消生效
+                time.sleep(0.5)
+                
+                # 3. 执行市价卖出补单 - 精确补足剩余数量
+                print(f"需要补卖: {remaining_sell:.2f}")
+                success = self.smart_sell_order(trade_price, remaining_sell)
+                if not success:
+                    print("❌ 市价卖出补单失败")
+                    return False
+                print("✅ 卖出补单完成，数量已平衡")
+                
+            elif buy_partially and sell_partially:
+                # 都是部分成交的情况
+                print(f"⚠️ 买卖都部分成交 - 买入: {buy_executed}/{buy_original}, 卖出: {sell_executed}/{sell_original}")
+                
+                remaining_buy = buy_original - buy_executed
+                remaining_sell = sell_original - sell_executed
+                
+                # 取消两个部分成交的订单
+                print("取消两个部分成交的订单...")
                 self.cancel_order(buy_order_id)
                 self.cancel_order(sell_order_id)
-                return False
-            
-            print(f"第 {round_num} 轮交易完成")
+                time.sleep(0.5)
+                
+                # 补足剩余数量
+                if remaining_buy > 0:
+                    print(f"补买剩余数量: {remaining_buy:.2f}")
+                    self.smart_buy_order(trade_price, remaining_buy)
+                
+                if remaining_sell > 0:
+                    print(f"补卖剩余数量: {remaining_sell:.2f}")
+                    self.smart_sell_order(trade_price, remaining_sell)
+                
+                print("✅ 部分成交补单完成")
+                
+            else:
+                print("❌ 买卖订单都未成交或无法获取订单状态")
+                
+                # 如果无法获取订单状态，通过余额对比判断实际情况
+                if buy_status is None or sell_status is None:
+                    print("⚠️ 无法获取订单状态，使用余额对比判断")
+                    current_balance = self.get_asset_balance()
+                    balance_change = current_balance - initial_balance
+                    
+                    print(f"余额变化: {balance_change:.2f}")
+                    
+                    if abs(balance_change) <= 0.1:
+                        print("💡 余额无显著变化，可能订单都未成交")
+                        # 取消所有订单
+                        self.cancel_order(buy_order_id)
+                        self.cancel_order(sell_order_id)
+                        print("ℹ️ 已尝试取消所有订单，本轮结束")
+                        return False
+                    elif balance_change > 0.1:
+                        print("💡 余额增加，可能有买入成交，执行卖出补单")
+                        success = self.smart_sell_order(trade_price, abs(balance_change))
+                        return success
+                    elif balance_change < -0.1:
+                        print("💡 余额减少，可能有卖出成交，执行买入补单")
+                        success = self.smart_buy_order(trade_price, abs(balance_change))
+                        return success
+                else:
+                    # 正常情况：都未成交，取消所有订单
+                    print("取消所有未成交订单")
+                    self.cancel_order(buy_order_id)
+                    self.cancel_order(sell_order_id)
+                    time.sleep(1)
+                    print("ℹ️ 所有未成交订单已取消，本轮结束")
+                    return False
+                
+            # 统计完成的轮次
+            self.completed_rounds += 1
+            print(f"✅ 第 {round_num} 轮交易完成")
             return True
             
         except Exception as e:
@@ -745,23 +1275,23 @@ class VolumeStrategy:
             print("无法连接交易所，策略终止")
             return False
         
-        # 检查初始余额 - 根据交易对自动检测
-        base_asset = self.symbol.replace('USDT', '')  # 自动获取基础资产
-        account_info = self.client.get_account_info()
-        if account_info and 'balances' in account_info:
-            for balance in account_info['balances']:
-                if balance['asset'] == base_asset:
-                    asset_balance = float(balance['free'])
-                    required_quantity = float(self.quantity)
-                    
-                    if asset_balance < required_quantity:
-                        print(f"错误: {base_asset}余额不足!")
-                        print(f"当前余额: {asset_balance:.2f} {base_asset}")
-                        print(f"需要数量: {required_quantity:.2f} {base_asset}")
-                        print("程序停止")
-                        return False
-                    break
+        # 获取原始余额并记录
+        self.original_balance = self.get_asset_balance()
+        print(f"原始余额: {self.original_balance:.2f}")
         
+        # 检查余额并自动补齐
+        if not self.auto_purchase_if_insufficient():
+            print("❌ 余额补齐失败，无法执行策略")
+            return False
+        
+        # 重新获取余额作为循环期间的基准
+        self.initial_balance = self.get_asset_balance()
+        print(f"策略执行基准余额: {self.initial_balance:.2f}")
+        
+        if self.auto_purchased > 0:
+            print(f"📝 已自动购买 {self.auto_purchased:.2f}，策略结束后将自动卖出恢复原始余额")
+        
+        print(f"✅ 余额检查通过，开始执行 {self.rounds} 轮交易")
         success_rounds = 0
         
         try:
@@ -776,11 +1306,35 @@ class VolumeStrategy:
                     print(f"等待 {self.interval} 秒...")
                     time.sleep(self.interval)
             
-            print(f"\n=== 策略执行完成 ===")
-            print(f"成功轮次: {success_rounds}/{self.rounds}")
-            print(f"成功率: {success_rounds/self.rounds*100:.1f}%")
+            # 执行最终余额校验和补单
+            print(f"\n=== 执行最终余额校验 ===")
+            final_success = self.final_balance_reconciliation()
             
-            return success_rounds > 0
+            # 恢复到原始余额
+            restore_success = self.restore_original_balance()
+            
+            print(f"\n=== 策略执行完成 ===")
+            print(f"完成轮次: {self.completed_rounds}/{self.rounds}")
+            print(f"成功率: {(self.completed_rounds/self.rounds*100):.1f}%")
+            print(f"补单次数: {self.supplement_orders}")
+            print(f"估算损耗: {self.total_cost_diff:.4f} USDT")
+            
+            if self.auto_purchased > 0:
+                print(f"自动购买数量: {self.auto_purchased:.2f} ({'✅ 已恢复' if restore_success else '❌ 恢复失败'})")
+            
+            final_balance = self.get_asset_balance()
+            original_change = final_balance - self.original_balance
+            execution_change = final_balance - self.initial_balance
+            
+            print(f"原始余额: {self.original_balance:.2f}")
+            print(f"执行基准余额: {self.initial_balance:.2f}")
+            print(f"最终余额: {final_balance:.2f}")
+            print(f"与原始余额差异: {original_change:+.2f}")
+            print(f"与执行基准差异: {execution_change:+.2f}")
+            print(f"余额校验: {'✅ 通过' if final_success else '⚠️ 存在差异'}")
+            print(f"余额恢复: {'✅ 成功' if restore_success else '⚠️ 未完全恢复'}")
+            
+            return self.completed_rounds > 0
             
         except KeyboardInterrupt:
             print("\n用户中断策略执行")

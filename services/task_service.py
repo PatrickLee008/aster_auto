@@ -5,7 +5,7 @@
 from typing import Optional, List, Tuple
 import json
 
-from models import Task, Wallet, Strategy
+from models import Task, Wallet, Strategy, User
 from models.base import db
 from utils import ProcessManager, task_logger
 
@@ -33,6 +33,15 @@ class TaskService:
             existing_task = Task.query.filter_by(name=name, user_id=user_id).first()
             if existing_task:
                 return False, "任务名称已存在，请使用不同的名称", None
+            
+            # 验证用户和权限
+            user = User.query.get(user_id)
+            if not user:
+                return False, "用户不存在", None
+            
+            # 检查任务数量限制
+            if not user.can_create_task():
+                return False, f"任务数量已达上限({user.max_tasks})，请联系管理员提升配额", None
             
             # 验证钱包和策略
             wallet = Wallet.query.filter_by(id=wallet_id, user_id=user_id).first()

@@ -13,7 +13,7 @@ from flask_login import LoginManager
 # 导入模型和配置
 from models.base import db
 from models import User
-from controllers import auth_bp, wallet_bp, task_bp, main_bp
+from controllers import auth_bp, wallet_bp, task_bp, main_bp, users_bp
 from services import AuthService, StrategyService
 
 
@@ -83,6 +83,11 @@ def register_blueprints(app):
     app.register_blueprint(auth_bp)
     app.register_blueprint(wallet_bp)
     app.register_blueprint(task_bp)
+    
+    # 注册用户管理蓝图
+    if users_bp:
+        app.register_blueprint(users_bp)
+        print("用户管理蓝图注册完成")
     
     print("蓝图注册完成")
 

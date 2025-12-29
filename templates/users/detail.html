@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+
+{% block title %}用户详情 - {{ user.nickname }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 返回按钮 -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <a href="{{ url_for('users.index') }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>返回用户列表
+            </a>
+        </div>
+    </div>
+    
+    <!-- 用户基本信息 -->
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-user me-2"></i>用户信息
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label text-muted">昵称</label>
+                                <p class="h5">{{ user.nickname }}</p>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-muted">用户名</label>
+                                <p>{{ user.username }}</p>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-muted">邮箱</label>
+                                <p>{{ user.email or '未设置' }}</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label text-muted">状态</label>
+                                <p>
+                                    {% if user.is_active %}
+                                    <span class="badge bg-success">正常</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">禁用</span>
+                                    {% endif %}
+                                </p>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-muted">权限</label>
+                                <p>
+                                    {% if user.is_admin %}
+                                    <span class="badge bg-warning">管理员</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">普通用户</span>
+                                    {% endif %}
+                                </p>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label text-muted">任务配额</label>
+                                <p>
+                                    <span class="badge bg-info">{{ user.get_task_count() }}/{{ user.max_tasks }}</span>
+                                    剩余 {{ user.get_remaining_task_quota() }} 个
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label text-muted">创建时间</label>
+                                <p>{{ user.created_at.strftime('%Y-%m-%d %H:%M:%S') if user.created_at else '未知' }}</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label text-muted">最后登录</label>
+                                <p>{{ user.last_login.strftime('%Y-%m-%d %H:%M:%S') if user.last_login else '从未登录' }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <div class="btn-group">
+                        <a href="{{ url_for('users.edit', user_id=user.id) }}" class="btn btn-primary">
+                            <i class="fas fa-edit me-2"></i>编辑用户
+                        </a>
+                        {% if user.id != current_user.id %}
+                        <button class="btn btn-warning" onclick="toggleUserStatus({{ user.id }})">
+                            <i class="fas fa-{{ 'ban' if user.is_active else 'check' }} me-2"></i>
+                            {{ '禁用' if user.is_active else '启用' }}
+                        </button>
+                        <button class="btn btn-info" onclick="resetPassword({{ user.id }})">
+                            <i class="fas fa-key me-2"></i>重置密码
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 统计信息 -->
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">统计信息</h6>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <small class="text-muted">钱包数量</small>
+                        <h4 class="text-primary">{{ user.wallets|length }}</h4>
+                    </div>
+                    <div class="mb-3">
+                        <small class="text-muted">任务数量</small>
+                        <h4 class="text-success">{{ user.tasks|length }}</h4>
+                    </div>
+                    <div class="mb-3">
+                        <small class="text-muted">运行中任务</small>
+                        <h4 class="text-warning">{{ user.tasks|selectattr('status', 'equalto', 'running')|list|length }}</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 用户的钱包 -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-wallet me-2"></i>钱包列表 ({{ user.wallets|length }})
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if user.wallets %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>名称</th>
+                                    <th>类型</th>
+                                    <th>创建时间</th>
+                                    <th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for wallet in user.wallets %}
+                                <tr>
+                                    <td>{{ wallet.name }}</td>
+                                    <td>
+                                        <span class="badge bg-{{ 'primary' if wallet.wallet_type == 'spot' else 'info' }}">
+                                            {{ '现货' if wallet.wallet_type == 'spot' else '合约' }}
+                                        </span>
+                                    </td>
+                                    <td>{{ wallet.created_at.strftime('%Y-%m-%d') if wallet.created_at else '-' }}</td>
+                                    <td>
+                                        <span class="badge bg-success">正常</span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted text-center">暂无钱包</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 用户的任务 -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-tasks me-2"></i>任务列表 ({{ user.tasks|length }})
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if user.tasks %}
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>任务名</th>
+                                    <th>交易对</th>
+                                    <th>状态</th>
+                                    <th>进度</th>
+                                    <th>成功率</th>
+                                    <th>创建时间</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for task in user.tasks %}
+                                <tr>
+                                    <td>{{ task.name }}</td>
+                                    <td>{{ task.symbol }}</td>
+                                    <td>
+                                        {% if task.status == 'running' %}
+                                        <span class="badge bg-success">运行中</span>
+                                        {% elif task.status == 'stopped' %}
+                                        <span class="badge bg-secondary">已停止</span>
+                                        {% elif task.status == 'error' %}
+                                        <span class="badge bg-danger">错误</span>
+                                        {% else %}
+                                        <span class="badge bg-info">{{ task.status }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ task.successful_rounds }}/{{ task.rounds }}</td>
+                                    <td>{{ "%.1f"|format(task.get_success_rate()) }}%</td>
+                                    <td>{{ task.created_at.strftime('%m-%d') if task.created_at else '-' }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <p class="text-muted text-center">暂无任务</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 重置密码模态框 -->
+<div class="modal fade" id="resetPasswordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">重置密码</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="resetPasswordForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">新密码</label>
+                        <input type="password" class="form-control" name="password" required>
+                    </div>
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        重置后用户需要使用新密码重新登录
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-warning">重置密码</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentUserId = {{ user.id }};
+
+// 切换用户状态
+function toggleUserStatus(userId) {
+    if (confirm('确定要切换用户状态吗？')) {
+        fetch(`/users/${userId}/toggle-status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message, 'success');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showAlert(data.message, 'error');
+            }
+        })
+        .catch(error => {
+            showAlert('操作失败：' + error.message, 'error');
+        });
+    }
+}
+
+// 重置密码
+function resetPassword(userId) {
+    currentUserId = userId;
+    const modal = new bootstrap.Modal(document.getElementById('resetPasswordModal'));
+    modal.show();
+}
+
+// 提交重置密码表单
+document.getElementById('resetPasswordForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const password = formData.get('password');
+    
+    if (!password) {
+        showAlert('请输入新密码', 'error');
+        return;
+    }
+    
+    fetch(`/users/${currentUserId}/reset-password`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({password: password})
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('resetPasswordModal')).hide();
+            this.reset();
+        } else {
+            showAlert(data.message, 'error');
+        }
+    })
+    .catch(error => {
+        showAlert('操作失败：' + error.message, 'error');
+    });
+});
+
+// 显示提示消息
+function showAlert(message, type) {
+    const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
+    const alertHtml = `
+        <div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+    
+    const container = document.querySelector('.container-fluid');
+    container.insertAdjacentHTML('afterbegin', alertHtml);
+    
+    setTimeout(() => {
+        const alert = container.querySelector('.alert');
+        if (alert) {
+            alert.remove();
+        }
+    }, 3000);
+}
+</script>
+{% endblock %}

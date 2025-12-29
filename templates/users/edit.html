@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block title %}编辑用户 - {{ user.nickname }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <!-- 返回按钮 -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <a href="{{ url_for('users.detail', user_id=user.id) }}" class="btn btn-outline-secondary">
+                <i class="fas fa-arrow-left me-2"></i>返回用户详情
+            </a>
+        </div>
+    </div>
+    
+    <!-- 编辑表单 -->
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-edit me-2"></i>编辑用户信息
+                    </h5>
+                </div>
+                <form id="editUserForm">
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">用户名</label>
+                                    <input type="text" class="form-control" value="{{ user.username }}" readonly>
+                                    <small class="text-muted">用户名不可修改</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">昵称 <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" name="nickname" value="{{ user.nickname }}" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">邮箱</label>
+                                    <input type="email" class="form-control" name="email" value="{{ user.email or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">可创建任务数</label>
+                                    <input type="number" class="form-control" name="max_tasks" value="{{ user.max_tasks }}" min="0" max="100">
+                                    <small class="text-muted">当前: {{ user.get_task_count() }}/{{ user.max_tasks }}</small>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">账户状态</label>
+                                    <select class="form-control" name="is_active">
+                                        <option value="1" {{ 'selected' if user.is_active else '' }}>启用</option>
+                                        <option value="0" {{ 'selected' if not user.is_active else '' }}>禁用</option>
+                                    </select>
+                                </div>
+                                {% if user.id != current_user.id %}
+                                <div class="mb-3">
+                                    <label class="form-label">用户权限</label>
+                                    <select class="form-control" name="is_admin">
+                                        <option value="0" {{ 'selected' if not user.is_admin else '' }}>普通用户</option>
+                                        <option value="1" {{ 'selected' if user.is_admin else '' }}>管理员</option>
+                                    </select>
+                                </div>
+                                {% else %}
+                                <div class="mb-3">
+                                    <label class="form-label">用户权限</label>
+                                    <input type="text" class="form-control" value="{{ '管理员' if user.is_admin else '普通用户' }}" readonly>
+                                    <small class="text-muted">不能修改自己的权限</small>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        
+                        <hr>
+                        
+                        <div class="row">
+                            <div class="col-12">
+                                <h6>密码设置</h6>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label">新密码</label>
+                                            <input type="password" class="form-control" name="password" placeholder="留空则不修改密码">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label">确认密码</label>
+                                            <input type="password" class="form-control" name="confirm_password" placeholder="留空则不修改密码">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                {% if user.id != current_user.id %}
+                                <button type="button" class="btn btn-danger" onclick="deleteUser({{ user.id }})">
+                                    <i class="fas fa-trash me-2"></i>删除用户
+                                </button>
+                                {% endif %}
+                            </div>
+                            <div>
+                                <a href="{{ url_for('users.detail', user_id=user.id) }}" class="btn btn-secondary me-2">取消</a>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-save me-2"></i>保存修改
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 提交编辑表单
+document.getElementById('editUserForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const password = formData.get('password');
+    const confirmPassword = formData.get('confirm_password');
+    
+    // 验证密码
+    if (password && password !== confirmPassword) {
+        showAlert('两次输入的密码不一致', 'error');
+        return;
+    }
+    
+    const data = {
+        nickname: formData.get('nickname'),
+        email: formData.get('email'),
+        max_tasks: parseInt(formData.get('max_tasks')),
+        is_active: formData.get('is_active') === '1',
+        is_admin: formData.get('is_admin') === '1'
+    };
+    
+    // 只在有密码时添加密码字段
+    if (password) {
+        data.password = password;
+    }
+    
+    fetch('{{ url_for("users.edit", user_id=user.id) }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => {
+                window.location.href = '{{ url_for("users.detail", user_id=user.id) }}';
+            }, 1000);
+        } else {
+            showAlert(data.message, 'error');
+        }
+    })
+    .catch(error => {
+        showAlert('操作失败：' + error.message, 'error');
+    });
+});
+
+// 删除用户
+function deleteUser(userId) {
+    if (confirm('确定要删除这个用户吗？此操作不可恢复！\n\n删除用户将同时删除该用户的所有钱包和任务。')) {
+        fetch(`/users/${userId}/delete`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message, 'success');
+                setTimeout(() => {
+                    window.location.href = '{{ url_for("users.index") }}';
+                }, 1000);
+            } else {
+                showAlert(data.message, 'error');
+            }
+        })
+        .catch(error => {
+            showAlert('操作失败：' + error.message, 'error');
+        });
+    }
+}
+
+// 显示提示消息
+function showAlert(message, type) {
+    const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
+    const alertHtml = `
+        <div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+    
+    const container = document.querySelector('.container-fluid');
+    container.insertAdjacentHTML('afterbegin', alertHtml);
+    
+    setTimeout(() => {
+        const alert = container.querySelector('.alert');
+        if (alert) {
+            alert.remove();
+        }
+    }, 3000);
+}
+</script>
+{% endblock %}

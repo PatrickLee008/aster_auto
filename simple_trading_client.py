@@ -14,10 +14,10 @@ from config_env import SPOT_CONFIG, PROXY_CONFIG
 class SimpleTradingClient:
     """简化交易客户端 - 确保签名验证成功"""
     
-    def __init__(self):
+    def __init__(self, api_key=None, secret_key=None):
         """初始化客户端"""
-        self.api_key = SPOT_CONFIG['api_key']
-        self.secret_key = SPOT_CONFIG['secret_key']
+        self.api_key = api_key or SPOT_CONFIG['api_key']
+        self.secret_key = secret_key or SPOT_CONFIG['secret_key']
         self.host = 'https://sapi.asterdex.com'
         
         # 设置代理
@@ -188,7 +188,6 @@ class SimpleTradingClient:
             
             if response.status_code == 200:
                 result = response.json()
-                print(f"订单成功: ID {result.get('orderId')}")
                 return result
             else:
                 print(f"下单失败: HTTP {response.status_code}")

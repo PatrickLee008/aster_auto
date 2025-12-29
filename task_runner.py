@@ -191,19 +191,29 @@ class TaskRunner:
                 'proxy_port': None
             }
     
-    def update_task_stats(self, total_rounds=0, successful_rounds=0, failed_rounds=0):
+    def update_task_stats(self, total_rounds=0, successful_rounds=0, failed_rounds=0, 
+                          supplement_orders=0, total_cost_diff=0):
         """更新任务统计信息"""
         try:
             with self.app.app_context():
                 from models.base import db
                 task = db.session.get(Task, self.task_id)
                 if task:
+                    # 更新基础统计
                     if total_rounds > 0:
-                        task.total_rounds += total_rounds
+                        task.total_rounds = total_rounds  # 直接设置，不累加
                     if successful_rounds > 0:
-                        task.successful_rounds += successful_rounds
+                        task.successful_rounds = successful_rounds
                     if failed_rounds > 0:
-                        task.failed_rounds += failed_rounds
+                        task.failed_rounds = failed_rounds
+                    
+                    # 更新新的统计字段
+                    if supplement_orders > 0:
+                        task.supplement_orders = supplement_orders
+                    if total_cost_diff > 0:
+                        from decimal import Decimal
+                        task.total_cost_diff = Decimal(str(total_cost_diff))
+                    
                     db.session.commit()
                     
         except Exception as e:
@@ -279,12 +289,20 @@ class TaskRunner:
                     self.update_task_status('stopped')
                     
                     # 获取执行统计（如果策略提供）
-                    if hasattr(strategy_instance, 'successful_rounds'):
+                    if hasattr(strategy_instance, 'completed_rounds'):
+                        total_rounds = getattr(strategy_instance, 'completed_rounds', 0)
+                        supplement_orders = getattr(strategy_instance, 'supplement_orders', 0)
+                        total_cost_diff = getattr(strategy_instance, 'total_cost_diff', 0)
+                        
                         self.update_task_stats(
-                            total_rounds=getattr(strategy_instance, 'rounds', 0),
-                            successful_rounds=getattr(strategy_instance, 'successful_rounds', 0),
-                            failed_rounds=getattr(strategy_instance, 'rounds', 0) - getattr(strategy_instance, 'successful_rounds', 0)
+                            total_rounds=total_rounds,
+                            successful_rounds=total_rounds,  # 完成的轮次都算成功
+                            failed_rounds=0,
+                            supplement_orders=supplement_orders,
+                            total_cost_diff=total_cost_diff
                         )
+                        
+                        self.logger.info(f"策略统计 - 完成轮次: {total_rounds}, 补单数: {supplement_orders}, 总损耗: {total_cost_diff:.4f} USDT")
                 else:
                     self.logger.error("策略执行失败！")
                     self.update_task_status('error', '策略执行失败')

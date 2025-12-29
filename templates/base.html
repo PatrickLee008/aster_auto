@@ -75,6 +75,11 @@
                         </li>
                         {% if current_user.is_admin %}
                         <li class="nav-item">
+                            <a class="nav-link {{ 'active' if request.endpoint and request.endpoint.startswith('users.') }}" href="{{ url_for('users.index') }}">
+                                <i class="fas fa-users"></i> 用户管理
+                            </a>
+                        </li>
+                        <li class="nav-item">
                             <a class="nav-link" href="#">
                                 <i class="fas fa-cogs"></i> 系统设置
                             </a>

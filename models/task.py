@@ -43,6 +43,10 @@ class Task(db.Model, BaseModel):
     failed_rounds = db.Column(db.Integer, default=0)
     last_error = db.Column(db.Text)
     
+    # 新增统计字段
+    supplement_orders = db.Column(db.Integer, default=0, comment='补单数')
+    total_cost_diff = db.Column(Numeric(20, 8), default=0, comment='总损耗')
+    
     # 时间戳
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -101,7 +105,8 @@ class Task(db.Model, BaseModel):
         self.updated_at = datetime.utcnow()
         db.session.commit()
     
-    def update_statistics(self, total_rounds=0, successful_rounds=0, failed_rounds=0):
+    def update_statistics(self, total_rounds=0, successful_rounds=0, failed_rounds=0, 
+                         supplement_orders=0, total_cost_diff=0):
         """更新执行统计"""
         if total_rounds > 0:
             self.total_rounds += total_rounds
@@ -109,6 +114,10 @@ class Task(db.Model, BaseModel):
             self.successful_rounds += successful_rounds
         if failed_rounds > 0:
             self.failed_rounds += failed_rounds
+        if supplement_orders > 0:
+            self.supplement_orders += supplement_orders
+        if total_cost_diff > 0:
+            self.total_cost_diff += PyDecimal(str(total_cost_diff))
         db.session.commit()
     
     def get_success_rate(self):
