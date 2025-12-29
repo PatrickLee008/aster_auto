@@ -1,0 +1,504 @@
+{% extends "base.html" %}
+
+{% block page_title %}钱包管理{% endblock %}
+
+{% block page_actions %}
+<button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addWalletModal">
+    <i class="fas fa-plus"></i> 添加钱包
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-wallet"></i> 我的钱包</h5>
+            </div>
+            <div class="card-body">
+                {% if wallets %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>钱包名称</th>
+                                <th>类型</th>
+                                <th>地址信息</th>
+                                <th>状态</th>
+                                <th>创建时间</th>
+                                <th>最后使用</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for wallet in wallets %}
+                            <tr>
+                                <td>
+                                    <div>
+                                        <strong>{{ wallet.name }}</strong>
+                                        {% if wallet.description %}
+                                        <br><small class="text-muted">{{ wallet.description }}</small>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if wallet.wallet_type == 'spot' %}
+                                        <span class="badge bg-info">现货</span>
+                                    {% elif wallet.wallet_type == 'futures' %}
+                                        <span class="badge bg-warning">合约</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if wallet.wallet_type == 'spot' %}
+                                        <small class="text-muted">
+                                            {% set masked = wallet.get_masked_credentials() %}
+                                            API Key: {{ masked.api_key if masked.api_key else 'N/A' }}
+                                        </small>
+                                    {% elif wallet.wallet_type == 'futures' %}
+                                        <small class="text-muted">
+                                            用户地址: {{ wallet.user_address[:10] + '...' if wallet.user_address else 'N/A' }}<br>
+                                            签名地址: {{ wallet.signer_address[:10] + '...' if wallet.signer_address else 'N/A' }}
+                                        </small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if wallet.is_active %}
+                                        <span class="badge bg-success">活跃</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">禁用</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <small>{{ wallet.created_at.strftime('%Y-%m-%d') }}</small>
+                                </td>
+                                <td>
+                                    <small>
+                                        {% if wallet.last_used %}
+                                            {{ wallet.last_used.strftime('%Y-%m-%d %H:%M') }}
+                                        {% else %}
+                                            未使用
+                                        {% endif %}
+                                    </small>
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-primary" 
+                                                onclick="testConnection({{ wallet.id }})">
+                                            <i class="fas fa-plug"></i> 测试
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary"
+                                                onclick="editWallet({{ wallet.id }})">
+                                            <i class="fas fa-edit"></i> 编辑
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger"
+                                                onclick="deleteWallet({{ wallet.id }})">
+                                            <i class="fas fa-trash"></i> 删除
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-wallet fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">暂无钱包配置</h5>
+                    <p class="text-muted">添加您的第一个钱包配置以开始交易</p>
+                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addWalletModal">
+                        <i class="fas fa-plus"></i> 添加钱包
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 添加钱包模态框 -->
+<div class="modal fade" id="addWalletModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-plus"></i> 添加钱包</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="addWalletForm">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="walletName" class="form-label">钱包名称 *</label>
+                                <input type="text" class="form-control" id="walletName" name="name" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="walletType" class="form-label">钱包类型 *</label>
+                                <select class="form-select" id="walletType" name="wallet_type" required>
+                                    <option value="">选择类型</option>
+                                    <option value="spot">现货</option>
+                                    <option value="futures">合约</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="walletDescription" class="form-label">描述</label>
+                        <textarea class="form-control" id="walletDescription" name="description" rows="2"></textarea>
+                    </div>
+                    
+                    <!-- 现货配置 -->
+                    <div id="spotConfig" style="display: none;">
+                        <h6 class="text-primary"><i class="fas fa-coins"></i> 现货API配置</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="apiKey" class="form-label">API Key *</label>
+                                    <input type="text" class="form-control" id="apiKey" name="api_key">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="secretKey" class="form-label">Secret Key *</label>
+                                    <input type="password" class="form-control" id="secretKey" name="secret_key">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 合约配置 -->
+                    <div id="futuresConfig" style="display: none;">
+                        <h6 class="text-warning"><i class="fas fa-chart-line"></i> 合约API配置</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="userAddress" class="form-label">用户地址 *</label>
+                                    <input type="text" class="form-control" id="userAddress" name="user_address" placeholder="0x...">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="signerAddress" class="form-label">签名地址 *</label>
+                                    <input type="text" class="form-control" id="signerAddress" name="signer_address" placeholder="0x...">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="privateKey" class="form-label">私钥 *</label>
+                            <input type="password" class="form-control" id="privateKey" name="private_key" placeholder="0x...">
+                        </div>
+                    </div>
+                    
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> 保存钱包
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 编辑钱包模态框 -->
+<div class="modal fade" id="editWalletModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-edit"></i> 编辑钱包</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editWalletForm">
+                <input type="hidden" id="editWalletId" name="wallet_id">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editWalletName" class="form-label">钱包名称 *</label>
+                                <input type="text" class="form-control" id="editWalletName" name="name" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editWalletType" class="form-label">钱包类型</label>
+                                <select class="form-select" id="editWalletType" name="wallet_type" disabled>
+                                    <option value="spot">现货</option>
+                                    <option value="futures">合约</option>
+                                </select>
+                                <small class="text-muted">钱包类型不可修改</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editWalletDescription" class="form-label">描述</label>
+                        <textarea class="form-control" id="editWalletDescription" name="description" rows="2"></textarea>
+                    </div>
+                    
+                    <!-- 现货配置 -->
+                    <div id="editSpotConfig" style="display: none;">
+                        <h6 class="text-primary"><i class="fas fa-coins"></i> 现货API配置</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editApiKey" class="form-label">API Key</label>
+                                    <input type="text" class="form-control" id="editApiKey" name="api_key" placeholder="留空表示不修改">
+                                    <small class="text-muted">留空表示不修改当前密钥</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editSecretKey" class="form-label">Secret Key</label>
+                                    <input type="password" class="form-control" id="editSecretKey" name="secret_key" placeholder="留空表示不修改">
+                                    <small class="text-muted">留空表示不修改当前密钥</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 合约配置 -->
+                    <div id="editFuturesConfig" style="display: none;">
+                        <h6 class="text-warning"><i class="fas fa-chart-line"></i> 合约API配置</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editUserAddress" class="form-label">用户地址</label>
+                                    <input type="text" class="form-control" id="editUserAddress" name="user_address" readonly>
+                                    <small class="text-muted">地址不可修改</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="editSignerAddress" class="form-label">签名地址</label>
+                                    <input type="text" class="form-control" id="editSignerAddress" name="signer_address" readonly>
+                                    <small class="text-muted">地址不可修改</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="editPrivateKey" class="form-label">私钥</label>
+                            <input type="password" class="form-control" id="editPrivateKey" name="private_key" placeholder="留空表示不修改">
+                            <small class="text-muted">留空表示不修改当前私钥</small>
+                        </div>
+                    </div>
+                    
+                    
+                    <!-- 状态设置 -->
+                    <div class="card mt-3">
+                        <div class="card-body">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="editIsActive" name="is_active">
+                                <label class="form-check-label" for="editIsActive">
+                                    <i class="fas fa-check-circle"></i> 启用此钱包
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> 保存修改
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // 钱包类型切换
+    $('#walletType').on('change', function() {
+        const type = $(this).val();
+        $('#spotConfig, #futuresConfig').hide();
+        
+        if (type === 'spot') {
+            $('#spotConfig').show();
+        } else if (type === 'futures') {
+            $('#futuresConfig').show();
+        }
+    });
+    
+    
+    // 提交钱包表单
+    $('#addWalletForm').on('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(this);
+        
+        $.ajax({
+            url: '/api/wallets',
+            method: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                if (response.success) {
+                    $('#addWalletModal').modal('hide');
+                    showNotification('钱包添加成功！', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showNotification('添加失败：' + response.message, 'error');
+                }
+            },
+            error: function() {
+                showNotification('网络错误，请重试', 'error');
+            }
+        });
+    });
+    
+    
+    // 提交编辑表单
+    $('#editWalletForm').on('submit', function(e) {
+        e.preventDefault();
+        
+        const walletId = $('#editWalletId').val();
+        const formData = new FormData(this);
+        
+        $.ajax({
+            url: `/api/wallets/${walletId}`,
+            method: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(response) {
+                if (response.success) {
+                    $('#editWalletModal').modal('hide');
+                    showNotification('钱包更新成功！', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showNotification('更新失败：' + response.message, 'error');
+                }
+            },
+            error: function() {
+                showNotification('网络错误，请重试', 'error');
+            }
+        });
+    });
+});
+
+// 测试连接
+function testConnection(walletId) {
+    const btn = event.target.closest('button');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 测试中...';
+    btn.disabled = true;
+    
+    $.ajax({
+        url: `/api/wallets/${walletId}/test`,
+        method: 'POST',
+        success: function(response) {
+            if (response.success) {
+                showNotification('连接测试成功！API配置正常', 'success');
+            } else {
+                showNotification('连接测试失败：' + response.message, 'error');
+            }
+        },
+        error: function(xhr) {
+            let errorMsg = '网络错误，请重试';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMsg = xhr.responseJSON.message;
+            }
+            showNotification('测试失败：' + errorMsg, 'error');
+        },
+        complete: function() {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    });
+}
+
+// 显示通知消息
+function showNotification(message, type = 'info') {
+    // 创建通知元素
+    const notification = $(`
+        <div class="alert alert-${type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info'} alert-dismissible fade show" 
+             role="alert" style="position: fixed; top: 20px; right: 20px; z-index: 9999; min-width: 300px;">
+            <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `);
+    
+    // 添加到页面
+    $('body').append(notification);
+    
+    // 3秒后自动消失
+    setTimeout(function() {
+        notification.fadeOut(500, function() {
+            $(this).remove();
+        });
+    }, 3000);
+}
+
+// 编辑钱包
+function editWallet(walletId) {
+    // 获取钱包信息
+    $.ajax({
+        url: `/api/wallets/${walletId}`,
+        method: 'GET',
+        success: function(response) {
+            if (response.success) {
+                const wallet = response.wallet;
+                
+                // 填充表单数据
+                $('#editWalletId').val(wallet.id);
+                $('#editWalletName').val(wallet.name);
+                $('#editWalletDescription').val(wallet.description || '');
+                $('#editWalletType').val(wallet.wallet_type);
+                
+                // 根据钱包类型显示配置
+                $('#editSpotConfig, #editFuturesConfig').hide();
+                if (wallet.wallet_type === 'spot') {
+                    $('#editSpotConfig').show();
+                } else if (wallet.wallet_type === 'futures') {
+                    $('#editFuturesConfig').show();
+                    $('#editUserAddress').val(wallet.user_address || '');
+                    $('#editSignerAddress').val(wallet.signer_address || '');
+                }
+                
+                
+                // 状态配置
+                $('#editIsActive').prop('checked', wallet.is_active);
+                
+                // 显示模态框
+                $('#editWalletModal').modal('show');
+            } else {
+                showNotification('获取钱包信息失败：' + response.message, 'error');
+            }
+        },
+        error: function() {
+            showNotification('网络错误，请重试', 'error');
+        }
+    });
+}
+
+// 删除钱包
+function deleteWallet(walletId) {
+    if (confirm('确定要删除这个钱包吗？此操作不可恢复！')) {
+        $.ajax({
+            url: `/api/wallets/${walletId}`,
+            method: 'DELETE',
+            success: function(response) {
+                if (response.success) {
+                    showNotification('钱包删除成功！', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showNotification('删除失败：' + response.message, 'error');
+                }
+            },
+            error: function() {
+                showNotification('网络错误，请重试', 'error');
+            }
+        });
+    }
+}
+</script>
+{% endblock %}

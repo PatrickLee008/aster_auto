@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+
+{% block page_title %}仪表盘{% endblock %}
+
+{% block page_actions %}
+<div class="btn-group" role="group">
+    <a href="{{ url_for('main.wallets') }}" class="btn btn-outline-primary btn-sm">
+        <i class="fas fa-wallet"></i> 管理钱包
+    </a>
+    <a href="{{ url_for('main.tasks') }}" class="btn btn-outline-success btn-sm">
+        <i class="fas fa-plus"></i> 创建任务
+    </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- 统计卡片 -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">总钱包数</h5>
+                        <h2 class="mb-0">{{ stats.total_wallets }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-wallet fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">活跃钱包</h5>
+                        <h2 class="mb-0">{{ stats.active_wallets }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-check-circle fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-info">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">总任务数</h5>
+                        <h2 class="mb-0">{{ stats.total_tasks }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-tasks fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card text-white bg-warning">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h5 class="card-title">运行中任务</h5>
+                        <h2 class="mb-0">{{ stats.running_tasks }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="fas fa-play-circle fa-2x"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 最近任务 -->
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-clock"></i> 最近任务</h5>
+                <a href="{{ url_for('main.tasks') }}" class="btn btn-sm btn-outline-primary">查看全部</a>
+            </div>
+            <div class="card-body">
+                {% if recent_tasks %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>任务名称</th>
+                                <th>钱包</th>
+                                <th>策略</th>
+                                <th>状态</th>
+                                <th>最后更新</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for task in recent_tasks %}
+                            <tr>
+                                <td>
+                                    <strong>{{ task.name }}</strong>
+                                </td>
+                                <td>
+                                    <span class="badge bg-light text-dark">
+                                        {{ task.wallet.name }}
+                                    </span>
+                                </td>
+                                <td>{{ task.strategy.name }}</td>
+                                <td>
+                                    {% if task.status == 'running' %}
+                                        <span class="badge bg-success">运行中</span>
+                                    {% elif task.status == 'stopped' %}
+                                        <span class="badge bg-secondary">已停止</span>
+                                    {% elif task.status == 'error' %}
+                                        <span class="badge bg-danger">错误</span>
+                                    {% elif task.status == 'paused' %}
+                                        <span class="badge bg-warning">暂停</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {{ task.updated_at.strftime('%Y-%m-%d %H:%M') }}
+                                    </small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4">
+                    <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">暂无任务</h5>
+                    <p class="text-muted">开始创建您的第一个交易任务</p>
+                    <a href="{{ url_for('main.tasks') }}" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> 创建任务
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-info-circle"></i> 系统信息</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between mb-2">
+                    <span>当前用户:</span>
+                    <strong>{{ current_user.username }}</strong>
+                </div>
+                <div class="d-flex justify-content-between mb-2">
+                    <span>上次登录:</span>
+                    <small>{{ current_user.last_login.strftime('%Y-%m-%d %H:%M') if current_user.last_login else '首次登录' }}</small>
+                </div>
+                <div class="d-flex justify-content-between mb-2">
+                    <span>用户类型:</span>
+                    <span class="badge bg-{{ 'primary' if current_user.is_admin else 'secondary' }}">
+                        {{ '管理员' if current_user.is_admin else '普通用户' }}
+                    </span>
+                </div>
+                
+                <hr>
+                
+                <h6><i class="fas fa-chart-bar"></i> 快速操作</h6>
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('main.wallets') }}" class="btn btn-outline-primary btn-sm">
+                        <i class="fas fa-wallet"></i> 添加钱包
+                    </a>
+                    <a href="{{ url_for('main.tasks') }}" class="btn btn-outline-success btn-sm">
+                        <i class="fas fa-play"></i> 启动策略
+                    </a>
+                </div>
+                
+                <hr>
+                
+                <h6><i class="fas fa-network-wired"></i> 网络配置</h6>
+                <div class="small">
+                    {% if proxy_info and proxy_info.enabled %}
+                    <div class="text-success mb-2">
+                        <i class="fas fa-shield-alt"></i> 代理已启用
+                    </div>
+                    <div class="text-muted">
+                        <div>类型: {{ proxy_info.type.upper() }}</div>
+                        <div>地址: {{ proxy_info.host }}:{{ proxy_info.port }}</div>
+                        <small>用于访问交易所API</small>
+                    </div>
+                    {% else %}
+                    <div class="text-info">
+                        <i class="fas fa-globe"></i> 直连模式
+                        <br><small class="text-muted">直接访问交易所API</small>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- 帮助信息 -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="fas fa-question-circle"></i> 使用指南</h6>
+            </div>
+            <div class="card-body">
+                <ol class="small">
+                    <li>首先在钱包管理中添加您的API配置</li>
+                    <li>在任务管理中创建交易任务</li>
+                    <li>选择合适的策略和参数</li>
+                    <li>启动任务并监控运行状态</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

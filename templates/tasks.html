@@ -1,0 +1,827 @@
+{% extends "base.html" %}
+
+{% block page_title %}任务管理{% endblock %}
+
+{% block page_actions %}
+<button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createTaskModal">
+    <i class="fas fa-plus"></i> 创建任务
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="fas fa-tasks"></i> 我的任务</h5>
+            </div>
+            <div class="card-body">
+                {% if tasks %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>任务名称</th>
+                                <th>钱包</th>
+                                <th>策略</th>
+                                <th>状态</th>
+                                <th>执行统计</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for task in tasks %}
+                            <tr id="task-{{ task.id }}">
+                                <td>
+                                    <div>
+                                        <strong>{{ task.name }}</strong>
+                                        {% if task.description %}
+                                        <br><small class="text-muted">{{ task.description }}</small>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge bg-light text-dark">
+                                        <i class="fas fa-wallet"></i> {{ task.wallet.name }}
+                                    </span>
+                                    <br>
+                                    <small class="text-muted">
+                                        {% if task.wallet.wallet_type == 'spot' %}
+                                            <i class="fas fa-coins"></i> 现货
+                                        {% else %}
+                                            <i class="fas fa-chart-line"></i> 合约
+                                        {% endif %}
+                                    </small>
+                                </td>
+                                <td>
+                                    <div>
+                                        {{ task.strategy.name }}
+                                        <br>
+                                        <small class="text-muted">{{ task.strategy.strategy_type }}</small>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge bg-{{ 
+                                        'success' if task.status == 'running' else
+                                        'secondary' if task.status == 'stopped' else  
+                                        'danger' if task.status == 'error' else
+                                        'warning' if task.status == 'paused' else 'light'
+                                    }}">
+                                        {% if task.status == 'running' %}
+                                            <i class="fas fa-play"></i> 运行中
+                                        {% elif task.status == 'stopped' %}
+                                            <i class="fas fa-stop"></i> 已停止
+                                        {% elif task.status == 'error' %}
+                                            <i class="fas fa-exclamation-triangle"></i> 错误
+                                        {% elif task.status == 'paused' %}
+                                            <i class="fas fa-pause"></i> 暂停
+                                        {% endif %}
+                                    </span>
+                                    {% if task.process_id %}
+                                    <br><small class="text-muted">PID: {{ task.process_id }}</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="small">
+                                        总轮次: {{ task.total_rounds }}<br>
+                                        成功: <span class="text-success">{{ task.successful_rounds }}</span><br>
+                                        失败: <span class="text-danger">{{ task.failed_rounds }}</span>
+                                        {% if task.total_rounds > 0 %}
+                                        <br>成功率: {{ "%.1f"|format((task.successful_rounds / task.total_rounds) * 100) }}%
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>
+                                    <small>{{ task.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                                    {% if task.start_time %}
+                                    <br><small class="text-muted">启动: {{ task.start_time.strftime('%H:%M') }}</small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        {% if task.status == 'stopped' or task.status == 'error' %}
+                                        <button type="button" class="btn btn-outline-success"
+                                                onclick="startTask({{ task.id }})">
+                                            <i class="fas fa-play"></i> 启动
+                                        </button>
+                                        {% elif task.status == 'running' %}
+                                        <button type="button" class="btn btn-outline-warning"
+                                                onclick="pauseTask({{ task.id }})">
+                                            <i class="fas fa-pause"></i> 暂停
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger"
+                                                onclick="stopTask({{ task.id }})">
+                                            <i class="fas fa-stop"></i> 停止
+                                        </button>
+                                        {% elif task.status == 'paused' %}
+                                        <button type="button" class="btn btn-outline-success"
+                                                onclick="resumeTask({{ task.id }})">
+                                            <i class="fas fa-play"></i> 继续
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger"
+                                                onclick="stopTask({{ task.id }})">
+                                            <i class="fas fa-stop"></i> 停止
+                                        </button>
+                                        {% endif %}
+                                        
+                                        <button type="button" class="btn btn-outline-info"
+                                                onclick="viewTaskLogs({{ task.id }})">
+                                            <i class="fas fa-file-alt"></i> 日志
+                                        </button>
+                                        
+                                        {% if task.status == 'stopped' %}
+                                        <button type="button" class="btn btn-outline-secondary"
+                                                onclick="editTask({{ task.id }})">
+                                            <i class="fas fa-edit"></i> 编辑
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger"
+                                                onclick="deleteTask({{ task.id }})">
+                                            <i class="fas fa-trash"></i> 删除
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-tasks fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">暂无交易任务</h5>
+                    <p class="text-muted">创建您的第一个交易任务以开始自动化交易</p>
+                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createTaskModal">
+                        <i class="fas fa-plus"></i> 创建任务
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 创建任务模态框 -->
+<div class="modal fade" id="createTaskModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-plus"></i> 创建交易任务</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="createTaskForm">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="taskName" class="form-label">任务名称 *</label>
+                                <input type="text" class="form-control" id="taskName" name="name" required maxlength="100">
+                                <div class="form-text">任务名称必须唯一，用于生成日志文件（最多100字符）</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="taskWallet" class="form-label">选择钱包 *</label>
+                                <select class="form-select" id="taskWallet" name="wallet_id" required>
+                                    <option value="">选择钱包</option>
+                                    {% for wallet in wallets %}
+                                    <option value="{{ wallet.id }}" data-type="{{ wallet.wallet_type }}">
+                                        {{ wallet.name }} ({{ '现货' if wallet.wallet_type == 'spot' else '合约' }})
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="taskDescription" class="form-label">任务描述</label>
+                        <textarea class="form-control" id="taskDescription" name="description" rows="2"></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="taskStrategy" class="form-label">选择策略 *</label>
+                        <select class="form-select" id="taskStrategy" name="strategy_id" required>
+                            <option value="">选择策略</option>
+                            {% for strategy in strategies %}
+                            <option value="{{ strategy.id }}" 
+                                    data-supported-types="{{ strategy.supported_wallet_types }}"
+                                    data-default-params="{{ strategy.get_default_parameters() | tojson | e }}">
+                                {{ strategy.name }} - {{ strategy.description }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="mb-0"><i class="fas fa-cogs"></i> 交易参数</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="taskSymbol" class="form-label">
+                                        交易品种 <span class="text-danger">*</span>
+                                    </label>
+                                    <input type="text" class="form-control" id="taskSymbol" name="symbol" 
+                                           placeholder="例如: BTCUSDT" required>
+                                    <div class="form-text">请输入交易对符号，如BTCUSDT, ETHUSDT等</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="taskQuantity" class="form-label">
+                                        每次交易数量 <span class="text-danger">*</span>
+                                    </label>
+                                    <input type="number" class="form-control" id="taskQuantity" name="quantity" 
+                                           min="0.001" step="0.001" placeholder="0.001" required>
+                                    <div class="form-text">每次交易的数量，请根据交易对精度设置</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="taskInterval" class="form-label">
+                                        间隔秒数 <span class="text-danger">*</span>
+                                    </label>
+                                    <input type="number" class="form-control" id="taskInterval" name="interval" 
+                                           min="1" step="1" placeholder="60" required>
+                                    <div class="form-text">每次交易之间的时间间隔（秒）</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="taskRounds" class="form-label">
+                                        循环次数 <span class="text-danger">*</span>
+                                    </label>
+                                    <input type="number" class="form-control" id="taskRounds" name="rounds" 
+                                           min="1" step="1" placeholder="10" required>
+                                    <div class="form-text">总共执行多少轮交易</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="taskLeverage" class="form-label">杠杆倍数</label>
+                                    <select class="form-select" id="taskLeverage" name="leverage">
+                                        <option value="1">1x (现货)</option>
+                                        <option value="5">5x</option>
+                                        <option value="10">10x</option>
+                                        <option value="20">20x</option>
+                                        <option value="50">50x</option>
+                                        <option value="100">100x</option>
+                                    </select>
+                                    <div class="form-text">仅合约交易需要设置杠杆倍数</div>
+                                </div>
+                                <div class="col-md-6 mb-3" id="taskSideContainer" style="display: none;">
+                                    <label for="taskSide" class="form-label">交易方向</label>
+                                    <select class="form-select" id="taskSide" name="side">
+                                        <option value="buy">买入</option>
+                                        <option value="sell">卖出</option>
+                                        <option value="both">双向交易</option>
+                                    </select>
+                                    <div class="form-text">选择交易方向</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> 创建任务
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 编辑任务模态框 -->
+<div class="modal fade" id="editTaskModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-edit"></i> 编辑交易任务</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editTaskForm">
+                <input type="hidden" id="editTaskId" name="id">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editTaskName" class="form-label">任务名称 *</label>
+                                <input type="text" class="form-control" id="editTaskName" name="name" required maxlength="100">
+                                <div class="form-text">任务名称必须唯一，用于生成日志文件（最多100字符）</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="editTaskWallet" class="form-label">选择钱包 *</label>
+                                <select class="form-select" id="editTaskWallet" name="wallet_id" required>
+                                    <option value="">选择钱包</option>
+                                    {% for wallet in wallets %}
+                                    <option value="{{ wallet.id }}" data-type="{{ wallet.wallet_type }}">
+                                        {{ wallet.name }} ({{ '现货' if wallet.wallet_type == 'spot' else '合约' }})
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editTaskDescription" class="form-label">任务描述</label>
+                        <textarea class="form-control" id="editTaskDescription" name="description" rows="2"></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="editTaskStrategy" class="form-label">选择策略 *</label>
+                        <select class="form-select" id="editTaskStrategy" name="strategy_id" required>
+                            <option value="">选择策略</option>
+                            {% for strategy in strategies %}
+                            <option value="{{ strategy.id }}" 
+                                    data-supported-types="{{ strategy.supported_wallet_types }}"
+                                    data-default-params="{{ strategy.get_default_parameters() | tojson | e }}">
+                                {{ strategy.name }} - {{ strategy.description }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="mb-0"><i class="fas fa-cogs"></i> 交易参数</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="editTaskSymbol" class="form-label">
+                                        交易品种 <span class="text-danger">*</span>
+                                    </label>
+                                    <input type="text" class="form-control" id="editTaskSymbol" name="symbol" 
+                                           placeholder="例如: BTCUSDT" required>
+                                    <div class="form-text">请输入交易对符号，如BTCUSDT, ETHUSDT等</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="editTaskQuantity" class="form-label">
+                                        每次交易数量 <span class="text-danger">*</span>
+                                    </label>
+                                    <input type="number" class="form-control" id="editTaskQuantity" name="quantity" 
+                                           min="0.001" step="0.001" placeholder="0.001" required>
+                                    <div class="form-text">每次交易的数量，请根据交易对精度设置</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="editTaskInterval" class="form-label">
+                                        间隔秒数 <span class="text-danger">*</span>
+                                    </label>
+                                    <input type="number" class="form-control" id="editTaskInterval" name="interval" 
+                                           min="1" step="1" placeholder="60" required>
+                                    <div class="form-text">每次交易之间的时间间隔（秒）</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="editTaskRounds" class="form-label">
+                                        循环次数 <span class="text-danger">*</span>
+                                    </label>
+                                    <input type="number" class="form-control" id="editTaskRounds" name="rounds" 
+                                           min="1" step="1" placeholder="10" required>
+                                    <div class="form-text">总共执行多少轮交易</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="editTaskLeverage" class="form-label">杠杆倍数</label>
+                                    <select class="form-select" id="editTaskLeverage" name="leverage">
+                                        <option value="1">1x (现货)</option>
+                                        <option value="5">5x</option>
+                                        <option value="10">10x</option>
+                                        <option value="20">20x</option>
+                                        <option value="50">50x</option>
+                                        <option value="100">100x</option>
+                                    </select>
+                                    <div class="form-text">仅合约交易需要设置杠杆倍数</div>
+                                </div>
+                                <div class="col-md-6 mb-3" id="editTaskSideContainer" style="display: none;">
+                                    <label for="editTaskSide" class="form-label">交易方向</label>
+                                    <select class="form-select" id="editTaskSide" name="side">
+                                        <option value="buy">买入</option>
+                                        <option value="sell">卖出</option>
+                                        <option value="both">双向交易</option>
+                                    </select>
+                                    <div class="form-text">选择交易方向</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save"></i> 保存修改
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 任务日志模态框 -->
+<div class="modal fade" id="taskLogsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-file-alt"></i> 任务日志</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <pre id="taskLogsContent" style="max-height: 500px; overflow-y: auto; background-color: #f8f9fa; padding: 1rem; border-radius: 0.375rem;">
+                    加载中...
+                </pre>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger" onclick="clearTaskLogs()">
+                    <i class="fas fa-trash"></i> 清除日志
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-primary" onclick="refreshLogs()">
+                    <i class="fas fa-refresh"></i> 刷新
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentTaskId = null;
+
+$(document).ready(function() {
+    // 钱包选择变化时过滤策略
+    $('#taskWallet, #editTaskWallet').on('change', function() {
+        const walletType = $(this).find('option:selected').data('type');
+        const strategySelector = $(this).attr('id') === 'taskWallet' ? '#taskStrategy' : '#editTaskStrategy';
+        
+        $(strategySelector + ' option').each(function() {
+            const supportedTypes = $(this).data('supported-types');
+            if (supportedTypes && supportedTypes.includes(walletType)) {
+                $(this).show();
+            } else if ($(this).val() === '') {
+                $(this).show(); // 保留空选项
+            } else {
+                $(this).hide();
+            }
+        });
+        $(strategySelector).val('').trigger('change');
+    });
+    
+    // 根据钱包类型显示/隐藏杠杆字段
+    function toggleLeverageField() {
+        const selectedWallet = $('#taskWallet option:selected, #editTaskWallet option:selected');
+        const walletType = selectedWallet.data('type');
+        
+        if (walletType === 'futures') {
+            // 合约交易显示杠杆字段
+            $('[id*="Leverage"]').closest('.mb-3').show();
+        } else {
+            // 现货交易隐藏杠杆字段并设为1
+            $('[id*="Leverage"]').closest('.mb-3').hide();
+            $('[id*="Leverage"]').val(1);
+        }
+    }
+    
+    // 钱包选择变化时更新杠杆字段显示状态
+    $('#taskWallet, #editTaskWallet').on('change', toggleLeverageField);
+    
+    // 策略选择变化时更新字段显示
+    function updateFieldsBasedOnStrategy(strategySelector, leverageSelector, sideSelector) {
+        const selectedStrategy = $(strategySelector + ' option:selected');
+        const strategyType = selectedStrategy.closest('option').text();
+        
+        // 根据策略类型决定是否显示交易方向字段
+        if (strategyType.includes('volume') || strategyType.includes('hidden')) {
+            // 现货刷量策略和合约HIDDEN策略不需要选择交易方向
+            $(sideSelector).hide();
+            $(sideSelector.replace('Container', '')).val('both'); // 设为默认值
+        } else {
+            // 其他策略类型显示交易方向选择
+            $(sideSelector).show();
+        }
+    }
+    
+    $('#taskStrategy').on('change', function() {
+        updateFieldsBasedOnStrategy('#taskStrategy', '#taskLeverageContainer', '#taskSideContainer');
+    });
+    
+    $('#editTaskStrategy').on('change', function() {
+        updateFieldsBasedOnStrategy('#editTaskStrategy', '#editTaskLeverageContainer', '#editTaskSideContainer');
+    });
+    
+    // 提交任务表单
+    $('#createTaskForm').on('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = {
+            name: $('#taskName').val(),
+            description: $('#taskDescription').val(),
+            wallet_id: $('#taskWallet').val(),
+            strategy_id: $('#taskStrategy').val(),
+            symbol: $('#taskSymbol').val(),
+            quantity: $('#taskQuantity').val(),
+            interval: $('#taskInterval').val(),
+            rounds: $('#taskRounds').val(),
+            leverage: $('#taskLeverage').val(),
+            side: $('#taskSide').val() || 'both',  // 默认为双向交易
+            order_type: 'market'  // 暂时固定为市价单
+        };
+        
+        $.ajax({
+            url: '/api/tasks',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(formData),
+            success: function(response) {
+                if (response.success) {
+                    location.reload();
+                } else {
+                    alert('创建失败：' + response.message);
+                }
+            },
+            error: function() {
+                alert('网络错误，请重试');
+            }
+        });
+    });
+    
+    // 提交编辑任务表单
+    $('#editTaskForm').on('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = {
+            name: $('#editTaskName').val(),
+            description: $('#editTaskDescription').val(),
+            wallet_id: $('#editTaskWallet').val(),
+            strategy_id: $('#editTaskStrategy').val(),
+            symbol: $('#editTaskSymbol').val(),
+            quantity: $('#editTaskQuantity').val(),
+            interval: $('#editTaskInterval').val(),
+            rounds: $('#editTaskRounds').val(),
+            leverage: $('#editTaskLeverage').val(),
+            side: $('#editTaskSide').val() || 'both',  // 默认为双向交易
+            order_type: 'market'
+        };
+        
+        const taskId = $('#editTaskId').val();
+        
+        $.ajax({
+            url: `/api/tasks/${taskId}`,
+            method: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify(formData),
+            success: function(response) {
+                if (response.success) {
+                    $('#editTaskModal').modal('hide');
+                    location.reload();
+                } else {
+                    alert('更新失败：' + response.message);
+                }
+            },
+            error: function() {
+                alert('网络错误，请重试');
+            }
+        });
+    });
+});
+
+
+// 任务控制函数
+function startTask(taskId) {
+    controlTask(taskId, 'start');
+}
+
+function stopTask(taskId) {
+    controlTask(taskId, 'stop');
+}
+
+function pauseTask(taskId) {
+    controlTask(taskId, 'pause');
+}
+
+function resumeTask(taskId) {
+    controlTask(taskId, 'resume');
+}
+
+function controlTask(taskId, action) {
+    console.log(`执行任务操作: ${action}, 任务ID: ${taskId}`);
+    
+    $.ajax({
+        url: `/api/tasks/${taskId}/${action}`,
+        method: 'POST',
+        success: function(response) {
+            console.log('任务操作响应:', response);
+            
+            if (response.success) {
+                // 显示成功信息
+                const actionNames = {
+                    'start': '启动',
+                    'stop': '停止', 
+                    'pause': '暂停',
+                    'resume': '恢复'
+                };
+                
+                alert(`任务${actionNames[action]}成功：${response.message}`);
+                
+                // 刷新任务状态
+                setTimeout(() => location.reload(), 500);
+            } else {
+                alert(`操作失败：${response.message}`);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('任务操作失败:', status, error, xhr.responseText);
+            
+            let errorMessage = '网络错误，请重试';
+            if (xhr.responseText) {
+                try {
+                    const errorResponse = JSON.parse(xhr.responseText);
+                    errorMessage = errorResponse.message || errorMessage;
+                } catch (e) {
+                    // 解析失败，使用默认错误信息
+                }
+            }
+            
+            alert(errorMessage);
+        }
+    });
+}
+
+// 查看任务日志
+function viewTaskLogs(taskId) {
+    currentTaskId = taskId;
+    $('#taskLogsModal').modal('show');
+    loadTaskLogs(taskId);
+}
+
+function loadTaskLogs(taskId) {
+    $('#taskLogsContent').text('加载中...');
+    
+    $.ajax({
+        url: `/api/tasks/${taskId}/logs`,
+        method: 'GET',
+        success: function(response) {
+            if (response.success) {
+                const logs = response.logs || '暂无日志';
+                
+                // 检查是否是"尚未生成日志文件"的情况
+                if (logs.includes('尚未生成日志文件') || logs.includes('日志文件为空')) {
+                    // 隐藏清除日志按钮
+                    $('#taskLogsModal .btn-danger').hide();
+                    
+                    // 为没有日志的任务提供友好提示
+                    $('#taskLogsContent').html(`<div style="text-align: center; color: #6c757d; padding: 40px;">
+                        <i class="fas fa-file-alt fa-3x mb-3" style="opacity: 0.5;"></i>
+                        <h5>暂无日志记录</h5>
+                        <p>该任务尚未生成日志文件，可能的原因：</p>
+                        <ul style="text-align: left; display: inline-block;">
+                            <li>任务从未启动过</li>
+                            <li>任务正在启动中，日志文件尚未创建</li>
+                            <li>日志文件被意外删除</li>
+                        </ul>
+                        <div style="margin-top: 20px;">
+                            <button class="btn btn-primary btn-sm" onclick="startTaskFromLogs(${taskId})">
+                                <i class="fas fa-play"></i> 启动任务
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="refreshLogs()">
+                                <i class="fas fa-refresh"></i> 刷新日志
+                            </button>
+                        </div>
+                    </div>`);
+                } else {
+                    // 显示清除日志按钮
+                    $('#taskLogsModal .btn-danger').show();
+                    
+                    // 正常显示日志内容
+                    $('#taskLogsContent').text(logs);
+                }
+            } else {
+                $('#taskLogsContent').html(`<div style="text-align: center; color: #dc3545; padding: 20px;">
+                    <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
+                    <h5>加载日志失败</h5>
+                    <p>${response.message}</p>
+                    <button class="btn btn-secondary btn-sm" onclick="refreshLogs()">
+                        <i class="fas fa-refresh"></i> 重试
+                    </button>
+                </div>`);
+            }
+        },
+        error: function() {
+            $('#taskLogsContent').html(`<div style="text-align: center; color: #dc3545; padding: 20px;">
+                <i class="fas fa-wifi fa-2x mb-3" style="opacity: 0.5;"></i>
+                <h5>网络连接错误</h5>
+                <p>无法连接到服务器，请检查网络连接</p>
+                <button class="btn btn-secondary btn-sm" onclick="refreshLogs()">
+                    <i class="fas fa-refresh"></i> 重试
+                </button>
+            </div>`);
+        }
+    });
+}
+
+// 从日志对话框启动任务
+function startTaskFromLogs(taskId) {
+    controlTask(taskId, 'start');
+    // 关闭日志对话框
+    setTimeout(() => {
+        $('#taskLogsModal').modal('hide');
+    }, 1000);
+}
+
+function refreshLogs() {
+    if (currentTaskId) {
+        loadTaskLogs(currentTaskId);
+    }
+}
+
+// 清除任务日志
+function clearTaskLogs() {
+    if (!currentTaskId) {
+        return;
+    }
+    
+    if (!confirm('确定要清除这个任务的所有日志吗？此操作不可恢复！')) {
+        return;
+    }
+    
+    $.ajax({
+        url: `/api/tasks/${currentTaskId}/logs/clear`,
+        method: 'POST',
+        success: function(response) {
+            if (response.success) {
+                alert('日志清除成功');
+                // 刷新日志显示
+                loadTaskLogs(currentTaskId);
+            } else {
+                alert('日志清除失败：' + response.message);
+            }
+        },
+        error: function() {
+            alert('网络错误，无法清除日志');
+        }
+    });
+}
+
+// 编辑任务
+function editTask(taskId) {
+    // 获取任务详情
+    $.ajax({
+        url: `/api/tasks/${taskId}`,
+        method: 'GET',
+        success: function(response) {
+            if (response.success) {
+                const task = response.task;
+                populateEditForm(task);
+                $('#editTaskModal').modal('show');
+            } else {
+                alert('获取任务信息失败：' + response.message);
+            }
+        },
+        error: function() {
+            alert('网络错误，无法获取任务信息');
+        }
+    });
+}
+
+// 填充编辑表单
+function populateEditForm(task) {
+    $('#editTaskName').val(task.name);
+    $('#editTaskDescription').val(task.description);
+    $('#editTaskWallet').val(task.wallet.id);
+    $('#editTaskStrategy').val(task.strategy.id);
+    $('#editTaskId').val(task.id);
+    
+    // 填充交易参数
+    const params = task.parameters || {};
+    $('#editTaskSymbol').val(params.symbol || task.symbol || '');
+    $('#editTaskQuantity').val(params.quantity || task.quantity || '');
+    $('#editTaskInterval').val(params.interval || task.interval || '');
+    $('#editTaskRounds').val(params.rounds || task.rounds || '');
+    $('#editTaskLeverage').val(params.leverage || task.leverage || 1);
+    $('#editTaskSide').val(params.side || task.side || 'buy');
+}
+
+// 删除任务
+function deleteTask(taskId) {
+    if (confirm('确定要删除这个任务吗？此操作不可恢复！')) {
+        $.ajax({
+            url: `/api/tasks/${taskId}`,
+            method: 'DELETE',
+            success: function(response) {
+                if (response.success) {
+                    location.reload();
+                } else {
+                    alert('删除失败：' + response.message);
+                }
+            },
+            error: function() {
+                alert('网络错误，请重试');
+            }
+        });
+    }
+}
+
+// 定期刷新任务状态
+setInterval(function() {
+    location.reload();
+}, 30000); // 每30秒刷新一次
+</script>
+{% endblock %}

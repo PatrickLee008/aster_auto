@@ -1,0 +1,44 @@
+# 生产环境配置文件
+# 部署到服务器时请根据实际环境修改配置
+
+# 数据库配置
+DB_HOST=localhost
+DB_PORT=3306
+DB_USERNAME=aster_user
+DB_PASSWORD=your-secure-password-here
+DB_DATABASE=aster_auto
+
+# Flask应用配置
+FLASK_SECRET_KEY=your-production-secret-key-very-long-and-secure
+FLASK_HOST=0.0.0.0
+FLASK_PORT=5000
+FLASK_DEBUG=False
+
+# 安全配置
+ENCRYPTION_KEY=your-production-encryption-key-32chars
+
+# 日志配置
+LOG_LEVEL=WARNING
+LOG_DIR=/var/log/aster_auto
+MAX_LOG_FILES=50
+
+# 代理配置
+PROXY_ENABLED=False
+PROXY_HOST=127.0.0.1
+PROXY_PORT=7890
+PROXY_TYPE=socks5
+
+# 期货交易配置 (以太坊风格签名)
+FUTURES_USER_ADDRESS=0x056b241835dBe6F401BA19e94cB2039330445F33
+FUTURES_SIGNER_ADDRESS=0x4273a4a866cf2f5ed8ab6dfd19a24f75eed43245
+FUTURES_PRIVATE_KEY=0x0970faf9405862f4aca808494d2d5740082a5bb6f5f6a37930d1c2314edced97
+
+# 现货交易配置 (HMAC SHA256签名)
+SPOT_API_KEY=f3d3233e01f373cf8734eb78accd602dd24ce7eff705982b63a090cd761ce21e
+SPOT_SECRET_KEY=7df12718e8f91e03fede14ca63843a6c15b1a4f0e35a9e43cd2d9cc307556aa7
+
+# API主机配置
+FUTURES_HOST=https://fapi.asterdex.com
+SPOT_HOST=https://sapi.asterdex.com
+FUTURES_TESTNET_HOST=https://testnet-fapi.asterdex.com
+SPOT_TESTNET_HOST=https://testnet-sapi.asterdex.com

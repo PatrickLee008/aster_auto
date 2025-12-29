@@ -1,0 +1,30 @@
+# AsterDEX 多钱包管理系统依赖包
+# 核心功能：交易策略执行、钱包管理、任务调度
+
+# Web框架
+Flask==2.3.3
+Werkzeug==2.3.7
+Flask-Login==0.6.3
+Flask-SQLAlchemy==3.0.5
+Flask-WTF==1.2.1
+WTForms==3.1.1
+
+# 数据库
+PyMySQL==1.1.0
+
+# 加密和安全
+cryptography==41.0.2
+bcrypt==4.0.1
+
+# 系统工具
+psutil==5.9.5
+APScheduler==3.10.1
+
+# 区块链和以太坊
+eth-account==0.13.7
+eth-abi==5.2.0
+web3==7.11.0
+
+# HTTP请求和代理
+requests==2.32.3
+requests[socks]==2.32.3
