@@ -92,23 +92,19 @@
                                         <br>补单: <span class="text-warning">{{ task.supplement_orders }}</span>
                                         {% endif %}
                                         
-                                        {% if task.buy_volume_usdt is not none or task.sell_volume_usdt is not none %}
                                         <br><strong>交易量统计:</strong>
-                                        <br>买单: <span class="text-success">{{ "%.2f"|format(task.buy_volume_usdt or 0) }} USDT</span>
-                                        <br>卖单: <span class="text-info">{{ "%.2f"|format(task.sell_volume_usdt or 0) }} USDT</span>
-                                        <br>总量: <span class="text-primary">{{ "%.2f"|format((task.buy_volume_usdt or 0) + (task.sell_volume_usdt or 0)) }} USDT</span>
+                                        <br>买单: <span class="text-success">{{ task.buy_volume_usdt or 0 }} USDT</span>
+                                        <br>卖单: <span class="text-info">{{ task.sell_volume_usdt or 0 }} USDT</span>
+                                        <br>总量: <span class="text-primary">{{ (task.buy_volume_usdt or 0) + (task.sell_volume_usdt or 0) }} USDT</span>
+                                        
+                                        <br>手续费: <span class="text-warning">{{ task.total_fees_usdt or 0 }} USDT</span>
+                                        
+                                        {% if task.usdt_balance_diff %}
+                                        <br>USDT差值: <span class="{{ 'text-success' if task.usdt_balance_diff > 0 else 'text-danger' }}">{{ task.usdt_balance_diff }} USDT</span>
                                         {% endif %}
                                         
-                                        {% if task.total_fees_usdt is not none %}
-                                        <br>手续费: <span class="text-warning">{{ "%.4f"|format(task.total_fees_usdt or 0) }} USDT</span>
-                                        {% endif %}
-                                        
-                                        {% if task.usdt_balance_diff is not none %}
-                                        <br>USDT差值: <span class="{{ 'text-success' if (task.usdt_balance_diff or 0) > 0 else 'text-danger' if (task.usdt_balance_diff or 0) < 0 else 'text-muted' }}">{{ "{:+.4f}"|format(task.usdt_balance_diff or 0) }} USDT</span>
-                                        {% endif %}
-                                        
-                                        {% if task.net_loss_usdt is not none %}
-                                        <br>净损耗: <span class="{{ 'text-success' if (task.net_loss_usdt or 0) > 0 else 'text-danger' if (task.net_loss_usdt or 0) < 0 else 'text-muted' }}">{{ "{:+.4f}"|format(task.net_loss_usdt or 0) }} USDT</span>
+                                        {% if task.net_loss_usdt %}
+                                        <br>净损耗: <span class="{{ 'text-success' if task.net_loss_usdt > 0 else 'text-danger' }}">{{ task.net_loss_usdt }} USDT</span>
                                         {% endif %}
                                         
                                         {% if task.total_cost_diff > 0 %}
