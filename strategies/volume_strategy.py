@@ -422,9 +422,9 @@ class VolumeStrategy:
             if quantity <= 0:
                 return None
             
-            # 简化处理：直接使用整数数量
+            # 确保数量至少为1
             import math
-            adjusted_quantity = math.floor(quantity)
+            adjusted_quantity = max(1, math.floor(quantity))
             quantity_str = str(int(adjusted_quantity))
             
             # 使用专用的市价单客户端
@@ -795,10 +795,29 @@ class VolumeStrategy:
                 # 计算本批买入数量
                 current_batch = min(shortage, batch_quantity)
                 
+                # 如果数量小于1，使用5 USDT等价的最小数量
+                if current_batch < 1:
+                    min_quantity_for_5usdt = 5.0 / estimated_price
+                    current_batch = max(1, min_quantity_for_5usdt)
+                    print(f"数量不足1个，改为5 USDT等价数量: {current_batch:.2f}")
+                
                 result = self.place_market_buy_order(current_batch)
                 
                 if not result or result == "ORDER_VALUE_TOO_SMALL":
                     print(f"❌ 第{batch_count + 1}批失败")
+                    # 如果常规批次失败，尝试最小5 USDT购买
+                    if current_batch >= 1:
+                        min_quantity_for_5usdt = 5.0 / estimated_price
+                        print(f"尝试最小5 USDT购买: {min_quantity_for_5usdt:.2f}")
+                        result = self.place_market_buy_order(min_quantity_for_5usdt)
+                        if result and result != "ORDER_VALUE_TOO_SMALL":
+                            batch_count += 1
+                            total_purchased += min_quantity_for_5usdt
+                            time.sleep(3)
+                            new_balance = self.get_asset_balance()
+                            print(f"第{batch_count}批(最小)完成，余额: {new_balance:.2f}")
+                            shortage = required_quantity - new_balance
+                            continue
                     break
                 
                 batch_count += 1
