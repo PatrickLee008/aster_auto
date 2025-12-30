@@ -473,7 +473,7 @@ class VolumeStrategy:
             return None
     
     def smart_buy_order(self, original_price: float, needed_quantity: float = None) -> bool:
-        """市价买入补单 - 补够指定数量"""
+        """市价买入补单 - 策略执行过程中的补货，直接补货不分批"""
         self.log("\\n--- 市价买入补单 ---")
         self.log(f"原始限价: {original_price:.5f} (仅供参考)")
         
@@ -505,7 +505,7 @@ class VolumeStrategy:
             return False
     
     def smart_sell_order(self, original_price: float, needed_quantity: float = None) -> bool:
-        """市价卖出补单 - 补够指定数量"""
+        """市价卖出补单 - 策略执行过程中的补货，直接补货不分批"""
         self.log("\\n--- 市价卖出补单 ---")
         self.log(f"原始限价: {original_price:.5f} (仅供参考)")
         
@@ -797,15 +797,16 @@ class VolumeStrategy:
                 print(f"  3. 账户USDT余额是否正确: {usdt_balance:.2f}")
                 return False
             
-            # 按40-50 USDT等价分批买入
-            batch_usdt_value = 45.0  # 每批45 USDT等价
+            # 策略开始时分批买入，最大分10批
+            max_batches = 10
+            batch_usdt_value = min(45.0, total_usdt_needed / max_batches)  # 每批USDT等价，最大分10批
             batch_quantity = batch_usdt_value / estimated_price
             total_purchased = 0.0
             batch_count = 0
             
-            print(f"开始分批补齐，每批约{batch_usdt_value} USDT等价 ({batch_quantity:.2f}个)")
+            print(f"开始分批补齐，最大{max_batches}批，每批约{batch_usdt_value:.1f} USDT等价 ({batch_quantity:.2f}个)")
             
-            while shortage > 0 and total_purchased < required_quantity:
+            while shortage > 0 and total_purchased < required_quantity and batch_count < max_batches:
                 # 计算本批买入数量
                 current_batch = min(shortage, batch_quantity)
                 
@@ -864,6 +865,19 @@ class VolumeStrategy:
                 print(f"⚠️ 余额差异很小({shortage_final:.2f})，视为足够: {final_balance:.2f}")
                 self.auto_purchased = total_purchased
                 return True
+            elif batch_count >= max_batches:
+                # 如果已经达到最大批次，剩余数量直接一次性买入
+                print(f"已完成{max_batches}批，剩余{shortage_final:.2f}个直接买入")
+                final_result = self.place_market_buy_order(shortage_final)
+                
+                if final_result and final_result != "ORDER_VALUE_TOO_SMALL":
+                    final_balance = self.get_asset_balance()
+                    print(f"✅ 最终补齐完成: {final_balance:.2f}")
+                    self.auto_purchased = total_purchased + shortage_final
+                    return True
+                else:
+                    print(f"❌ 最终补齐失败")
+                    return False
             else:
                 print(f"❌ 补齐不完整: {final_balance:.2f} < {required_quantity:.2f}")
                 return False
