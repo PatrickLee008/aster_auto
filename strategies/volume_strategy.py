@@ -1395,13 +1395,27 @@ class VolumeStrategy:
                             self.log(f"第 {round_num} 轮交易通过余额判断买入补单完成", 'info')
                         return success
                 else:
-                    # 正常情况：都未成交，取消所有订单
-                    print("取消所有未成交订单")
-                    self.cancel_order(buy_order_id)
-                    self.cancel_order(sell_order_id)
-                    time.sleep(1)
-                    print("ℹ️ 所有未成交订单已取消，本轮结束")
-                    return False
+                    # 正常情况：都未成交，取消订单并在本轮内重试
+                    print("❌ 买卖订单都未成交，取消订单并重试")
+                    
+                    # 取消所有未成交订单
+                    cancel_success = True
+                    if not self.cancel_order(buy_order_id):
+                        print("⚠️ 取消买入订单失败")
+                        cancel_success = False
+                    if not self.cancel_order(sell_order_id):
+                        print("⚠️ 取消卖出订单失败")
+                        cancel_success = False
+                    
+                    if cancel_success:
+                        print("✅ 订单取消成功，等待2秒后在本轮内重试")
+                        time.sleep(2)
+                        
+                        # 在本轮内重试，不返回False，而是继续循环
+                        return self.retry_round_until_success(round_num, initial_balance, max_retries=3)
+                    else:
+                        print("❌ 订单取消失败，结束本轮")
+                        return False
                 
             # 这里不应该到达，但如果到达了就标记为完成
             if not round_completed:
@@ -1420,6 +1434,108 @@ class VolumeStrategy:
             # 确保每一轮都有日志输出，便于调试
             if not round_completed:
                 self.log(f"第 {round_num} 轮交易结束 (未完成)", 'warning')
+    
+    def retry_round_until_success(self, round_num: int, initial_balance: float, max_retries: int = 3) -> bool:
+        """在本轮内重试直到成功或达到最大重试次数"""
+        self.log(f"=== 第{round_num}轮重试机制启动，最大重试{max_retries}次 ===", 'info')
+        
+        for retry_count in range(1, max_retries + 1):
+            self.log(f"第{round_num}轮第{retry_count}次重试", 'info')
+            print(f"\n🔄 第 {round_num} 轮第 {retry_count} 次重试")
+            
+            try:
+                # 获取新的订单薄数据
+                book_data = self.get_order_book()
+                if not book_data:
+                    self.log("重试时无法获取订单薄，等待后继续", 'warning')
+                    time.sleep(2)
+                    continue
+                
+                # 生成新的交易价格
+                trade_price = self.generate_trade_price(
+                    book_data['bid_price'],
+                    book_data['ask_price']
+                )
+                
+                print(f"重试订单: {self.quantity} {self.symbol} @ {trade_price:.5f}")
+                
+                # 重新提交订单
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    sell_future = executor.submit(self.place_sell_order, trade_price)
+                    time.sleep(0.25)
+                    buy_future = executor.submit(self.place_buy_order, trade_price)
+                    
+                    try:
+                        sell_order = sell_future.result(timeout=10)
+                        buy_order = buy_future.result(timeout=10)
+                        
+                        if not sell_order or not buy_order:
+                            print(f"重试{retry_count}: 订单提交失败，继续下次重试")
+                            continue
+                        
+                        sell_order_id = sell_order.get('orderId')
+                        buy_order_id = buy_order.get('orderId')
+                        
+                        # 等待并检查状态
+                        time.sleep(self.buy_timeout)
+                        buy_status = self.check_order_status(buy_order_id)
+                        sell_status = self.check_order_status(sell_order_id)
+                        
+                        print(f"重试{retry_count}状态: 买入={buy_status}, 卖出={sell_status}")
+                        
+                        # 判断重试结果
+                        if buy_status == 'FILLED' and sell_status == 'FILLED':
+                            print(f"✅ 重试{retry_count}成功: 双向成交")
+                            self.completed_rounds += 1
+                            self.log(f"第 {round_num} 轮交易通过重试{retry_count}完成", 'info')
+                            return True
+                            
+                        elif buy_status == 'FILLED' or sell_status == 'FILLED':
+                            # 部分成交，进行补单处理
+                            if sell_status == 'FILLED' and buy_status != 'FILLED':
+                                print(f"重试{retry_count}: 卖出成交，买入未成交，执行补单")
+                                self.cancel_order(buy_order_id)
+                                time.sleep(0.5)
+                                if self.smart_buy_order(trade_price):
+                                    self.completed_rounds += 1
+                                    self.log(f"第 {round_num} 轮交易通过重试{retry_count}补单完成", 'info')
+                                    return True
+                                    
+                            elif buy_status == 'FILLED' and sell_status != 'FILLED':
+                                print(f"重试{retry_count}: 买入成交，卖出未成交，执行补单")
+                                self.cancel_order(sell_order_id)
+                                time.sleep(0.5)
+                                if self.smart_sell_order(trade_price):
+                                    self.completed_rounds += 1
+                                    self.log(f"第 {round_num} 轮交易通过重试{retry_count}补单完成", 'info')
+                                    return True
+                        else:
+                            # 都未成交，取消订单继续重试
+                            print(f"重试{retry_count}: 都未成交，取消订单")
+                            self.cancel_order(buy_order_id)
+                            self.cancel_order(sell_order_id)
+                            time.sleep(2)
+                            
+                            if retry_count < max_retries:
+                                print(f"准备第{retry_count + 1}次重试...")
+                                continue
+                            else:
+                                print(f"❌ 重试{max_retries}次仍未成功，本轮失败")
+                                return False
+                        
+                    except Exception as retry_e:
+                        print(f"重试{retry_count}异常: {retry_e}")
+                        if retry_count < max_retries:
+                            continue
+                        else:
+                            return False
+                            
+            except Exception as e:
+                self.log(f"重试过程异常: {e}", 'error')
+                return False
+        
+        return False
     
     def run(self) -> bool:
         """运行策略"""
