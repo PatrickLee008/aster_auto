@@ -105,6 +105,19 @@ class TaskRunner:
             # 获取钱包凭证
             credentials = self.wallet.get_api_credentials()
             
+            # 检查凭证是否正确解密
+            if credentials['api_key'] and credentials['secret_key']:
+                self.logger.info(f"钱包凭证获取完成，api_key前8位: {credentials['api_key'][:8]}...{credentials['api_key'][-4:]}")
+            else:
+                self.logger.error(f"钱包凭证解密失败或为空: api_key={'存在' if self.wallet.api_key else '不存在'}, secret_key={'存在' if self.wallet.secret_key else '不存在'}")
+                # 检查加密密钥是否可用
+                from utils.encryption import test_encryption
+                try:
+                    test_result = test_encryption()
+                    self.logger.info(f"加密测试结果: {test_result}")
+                except Exception as e:
+                    self.logger.error(f"加密系统异常: {e}")
+            
             # 获取全局代理配置
             proxy_config = self.get_global_proxy_config()
             
@@ -115,6 +128,7 @@ class TaskRunner:
                     'secret_key': credentials['secret_key'],
                     **proxy_config
                 }
+                self.logger.info(f"现货钱包配置准备完成，使用钱包: {self.wallet.name}")
             elif self.wallet.wallet_type == 'futures':
                 config = {
                     'user_address': self.wallet.user_address,
@@ -122,6 +136,7 @@ class TaskRunner:
                     'private_key': credentials['private_key'],
                     **proxy_config
                 }
+                self.logger.info(f"期货钱包配置准备完成，使用钱包: {self.wallet.name}")
             else:
                 raise Exception(f"不支持的钱包类型: {self.wallet.wallet_type}")
             
@@ -247,6 +262,7 @@ class TaskRunner:
                 )
                 # 为策略设置钱包配置
                 strategy_instance.wallet_config = config
+                self.logger.info(f"钱包配置已设置到策略实例，配置包含: {list(config.keys())}")
             elif self.strategy.strategy_type == 'hidden_futures':
                 # 合约HIDDEN策略
                 strategy_instance = strategy_class(
@@ -258,6 +274,7 @@ class TaskRunner:
                 )
                 # 为策略设置钱包配置
                 strategy_instance.wallet_config = config
+                self.logger.info(f"钱包配置已设置到策略实例，配置包含: {list(config.keys())}")
             else:
                 raise Exception(f"不支持的策略类型: {self.strategy.strategy_type}")
             

@@ -51,3 +51,23 @@ def decrypt_data(encrypted_data):
 def generate_encryption_key():
     """生成新的加密密钥"""
     return Fernet.generate_key()
+
+
+def test_encryption():
+    """测试加密解密功能"""
+    test_data = "test_api_key_12345"
+    try:
+        # 尝试加密
+        encrypted = encrypt_data(test_data)
+        if not encrypted:
+            return "加密失败"
+        
+        # 尝试解密
+        decrypted = decrypt_data(encrypted)
+        if decrypted == test_data:
+            return "加密解密功能正常"
+        else:
+            return f"解密结果不匹配: 期望'{test_data}', 实际'{decrypted}'"
+            
+    except Exception as e:
+        return f"加密测试异常: {e}"

@@ -78,20 +78,29 @@ class VolumeStrategy:
             # 使用任务运行器传递的钱包配置
             if hasattr(self, 'wallet_config') and self.wallet_config:
                 config = self.wallet_config
-                self.client = SimpleTradingClient(
-                    api_key=config.get('api_key'),
-                    secret_key=config.get('secret_key')
-                )
-                self.market_client = MarketTradingClient(
-                    api_key=config.get('api_key'),
-                    secret_key=config.get('secret_key')
-                )
-                self.log("使用任务钱包配置连接交易所")
+                api_key = config.get('api_key')
+                secret_key = config.get('secret_key')
+                
+                if api_key and secret_key:
+                    self.client = SimpleTradingClient(
+                        api_key=api_key,
+                        secret_key=secret_key
+                    )
+                    self.market_client = MarketTradingClient(
+                        api_key=api_key,
+                        secret_key=secret_key
+                    )
+                    self.log(f"使用任务钱包配置连接交易所，API密钥: {api_key[:8]}...{api_key[-4:]}")
+                else:
+                    # API密钥或secret为空，回退到默认配置
+                    self.client = SimpleTradingClient()
+                    self.market_client = MarketTradingClient()
+                    self.log("钱包API密钥为空，使用默认配置连接交易所", 'warning')
             else:
                 # 回退到原有的配置方式
                 self.client = SimpleTradingClient()
                 self.market_client = MarketTradingClient()
-                self.log("使用默认配置连接交易所（回退模式）", 'warning')
+                self.log("未找到钱包配置，使用默认配置连接交易所（回退模式）", 'warning')
             
             if self.client.test_connection():
                 print("交易所连接成功")
