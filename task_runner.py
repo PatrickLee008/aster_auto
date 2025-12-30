@@ -115,6 +115,11 @@ class TaskRunner:
                 try:
                     test_result = test_encryption()
                     self.logger.info(f"加密测试结果: {test_result}")
+                    if test_result == "加密解密功能正常":
+                        self.logger.error("加密系统正常但钱包凭证解密失败，可能的原因:")
+                        self.logger.error("1. 钱包凭证是用不同的加密密钥加密的")
+                        self.logger.error("2. 请检查 ENCRYPTION_KEY 环境变量是否与加密时一致")
+                        self.logger.error("3. 可以使用 reset_wallet_credentials.py 重新设置钱包凭证")
                 except Exception as e:
                     self.logger.error(f"加密系统异常: {e}")
             

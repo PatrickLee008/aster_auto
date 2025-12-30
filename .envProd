@@ -1,11 +1,14 @@
 # 生产环境配置文件
-# 部署到服务器时请根据实际环境修改配置
+# CentOS服务器配置 - /www/wwwroot/aster_auto
+
+# 环境标识
+ENVIRONMENT=production
 
 # 数据库配置
 DB_HOST=localhost
 DB_PORT=3306
-DB_USERNAME=aster_user
-DB_PASSWORD=your-secure-password-here
+DB_USERNAME=root
+DB_PASSWORD=zaq12WSX
 DB_DATABASE=aster_auto
 
 # Flask应用配置
@@ -15,12 +18,12 @@ FLASK_PORT=5000
 FLASK_DEBUG=False
 
 # 安全配置
-ENCRYPTION_KEY=your-production-encryption-key-32chars
+ENCRYPTION_KEY=dev-encryption-key-32-chars-here
 
 # 日志配置
-LOG_LEVEL=WARNING
-LOG_DIR=/var/log/aster_auto
-MAX_LOG_FILES=50
+LOG_LEVEL=INFO
+LOG_DIR=/www/wwwroot/aster_auto/logs
+MAX_LOG_FILES=30
 
 # 代理配置
 PROXY_ENABLED=False

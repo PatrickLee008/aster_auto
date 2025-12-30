@@ -45,6 +45,9 @@ def decrypt_data(encrypted_data):
         return cipher_suite.decrypt(encrypted_data.encode()).decode()
     except Exception as e:
         print(f"解密失败: {e}")
+        print(f"加密数据长度: {len(encrypted_data)}")
+        print(f"加密数据前32字符: {encrypted_data[:32]}")
+        print(f"当前加密密钥前16字节: {get_encryption_key()[:16]}")
         return None
 
 
