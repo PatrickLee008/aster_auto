@@ -964,6 +964,7 @@ class VolumeStrategy:
     def execute_round(self, round_num: int) -> bool:
         """执行一轮交易"""
         print(f"\n=== 第 {round_num}/{self.rounds} 轮交易 ===")
+        self.log(f"开始执行第 {round_num} 轮交易", 'info')
         
         try:
             # 使用策略开始时记录的初始余额作为基准
@@ -1170,6 +1171,11 @@ class VolumeStrategy:
                     print("❌ 市价买入补单失败")
                     return False
                 print("✅ 买入补单完成，数量已平衡")
+                # 统计完成的轮次
+                self.completed_rounds += 1
+                print(f"✅ 第 {round_num} 轮交易完成")
+                self.log(f"第 {round_num} 轮交易通过买入补单完成", 'info')
+                return True
                 
             elif buy_filled and (not sell_filled or sell_partially):
                 # 买入完全成交，卖出未成交或部分成交
@@ -1198,6 +1204,11 @@ class VolumeStrategy:
                     print("❌ 市价卖出补单失败")
                     return False
                 print("✅ 卖出补单完成，数量已平衡")
+                # 统计完成的轮次
+                self.completed_rounds += 1
+                print(f"✅ 第 {round_num} 轮交易完成")
+                self.log(f"第 {round_num} 轮交易通过卖出补单完成", 'info')
+                return True
                 
             elif buy_partially and sell_partially:
                 # 都是部分成交的情况
@@ -1222,6 +1233,11 @@ class VolumeStrategy:
                     self.smart_sell_order(trade_price, remaining_sell)
                 
                 print("✅ 部分成交补单完成")
+                # 统计完成的轮次
+                self.completed_rounds += 1
+                print(f"✅ 第 {round_num} 轮交易完成")
+                self.log(f"第 {round_num} 轮交易通过部分成交补单完成", 'info')
+                return True
                 
             else:
                 print("❌ 买卖订单都未成交或无法获取订单状态")
@@ -1244,10 +1260,18 @@ class VolumeStrategy:
                     elif balance_change > 0.1:
                         print("💡 余额增加，可能有买入成交，执行卖出补单")
                         success = self.smart_sell_order(trade_price, abs(balance_change))
+                        if success:
+                            self.completed_rounds += 1
+                            print(f"✅ 第 {round_num} 轮交易完成")
+                            self.log(f"第 {round_num} 轮交易通过余额判断卖出补单完成", 'info')
                         return success
                     elif balance_change < -0.1:
                         print("💡 余额减少，可能有卖出成交，执行买入补单")
                         success = self.smart_buy_order(trade_price, abs(balance_change))
+                        if success:
+                            self.completed_rounds += 1
+                            print(f"✅ 第 {round_num} 轮交易完成")
+                            self.log(f"第 {round_num} 轮交易通过余额判断买入补单完成", 'info')
                         return success
                 else:
                     # 正常情况：都未成交，取消所有订单
@@ -1261,10 +1285,12 @@ class VolumeStrategy:
             # 统计完成的轮次
             self.completed_rounds += 1
             print(f"✅ 第 {round_num} 轮交易完成")
+            self.log(f"第 {round_num} 轮交易成功完成，双向成交", 'info')
             return True
             
         except Exception as e:
             print(f"交易轮次错误: {e}")
+            self.log(f"第 {round_num} 轮交易出现异常: {e}", 'error')
             return False
     
     def run(self) -> bool:
