@@ -291,26 +291,74 @@ function toggleUserStatus(userId) {
 }
 
 // 删除用户
-function deleteUser(userId) {
-    if (confirm('确定要删除这个用户吗？此操作不可恢复！')) {
-        fetch(`/users/${userId}/delete`, {
+async function deleteUser(userId) {
+    try {
+        // 首先获取用户详细信息
+        const userRow = document.querySelector(`tr[data-user-id="${userId}"]`);
+        const username = userRow.cells[1].textContent.trim();
+        const taskQuota = userRow.cells[2].textContent.trim();
+        
+        // 从API获取详细信息
+        const response = await fetch('/users/api/list');
+        const result = await response.json();
+        
+        if (result.success) {
+            const user = result.users.find(u => u.id === userId);
+            if (user) {
+                const walletCount = user.wallet_count || 0;
+                const taskCount = user.task_count || 0;
+                
+                let confirmMessage = `确定要删除用户 "${username}" 吗？\n\n`;
+                confirmMessage += `此操作将永久删除：\n`;
+                confirmMessage += `• 用户账户：${username}\n`;
+                if (walletCount > 0) {
+                    confirmMessage += `• 关联钱包：${walletCount} 个\n`;
+                }
+                if (taskCount > 0) {
+                    confirmMessage += `• 创建任务：${taskCount} 个\n`;
+                }
+                confirmMessage += `\n此操作不可恢复！`;
+                
+                if (confirm(confirmMessage)) {
+                    await performDelete(userId);
+                }
+            } else {
+                if (confirm('确定要删除这个用户吗？此操作不可恢复！')) {
+                    await performDelete(userId);
+                }
+            }
+        } else {
+            if (confirm('确定要删除这个用户吗？此操作不可恢复！')) {
+                await performDelete(userId);
+            }
+        }
+    } catch (error) {
+        if (confirm('确定要删除这个用户吗？此操作不可恢复！')) {
+            await performDelete(userId);
+        }
+    }
+}
+
+// 执行删除操作
+async function performDelete(userId) {
+    try {
+        const response = await fetch(`/users/${userId}/delete`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
             }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showAlert(data.message, 'success');
-                setTimeout(() => location.reload(), 1000);
-            } else {
-                showAlert(data.message, 'error');
-            }
-        })
-        .catch(error => {
-            showAlert('操作失败：' + error.message, 'error');
         });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert(data.message, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert(data.message, 'error');
+        }
+    } catch (error) {
+        showAlert('操作失败：' + error.message, 'error');
     }
 }
 

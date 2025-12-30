@@ -180,6 +180,9 @@
                     <a href="{{ url_for('main.tasks') }}" class="btn btn-outline-success btn-sm">
                         <i class="fas fa-play"></i> 启动策略
                     </a>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="showChangePasswordModal()">
+                        <i class="fas fa-key"></i> 修改密码
+                    </button>
                 </div>
                 
                 <hr>
@@ -221,4 +224,158 @@
         </div>
     </div>
 </div>
+
+<!-- 修改密码模态框 -->
+<div class="modal fade" id="changePasswordModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-key me-2"></i>修改密码
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="userChangePasswordForm">
+                    <div class="mb-3">
+                        <label for="userCurrentPassword" class="form-label">当前密码</label>
+                        <input type="password" class="form-control" id="userCurrentPassword" 
+                               placeholder="请输入当前密码" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="userNewPassword" class="form-label">新密码</label>
+                        <input type="password" class="form-control" id="userNewPassword" 
+                               placeholder="请输入新密码" required minlength="6">
+                    </div>
+                    <div class="mb-3">
+                        <label for="userConfirmPassword" class="form-label">确认新密码</label>
+                        <input type="password" class="form-control" id="userConfirmPassword" 
+                               placeholder="请再次输入新密码" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="submitPasswordChange()">
+                    <i class="fas fa-save me-2"></i>保存修改
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 成功提示模态框 -->
+<div class="modal fade" id="successModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-check-circle me-2"></i>操作成功
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="successMessage">密码修改成功！</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-success" data-bs-dismiss="modal">确定</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 错误提示模态框 -->
+<div class="modal fade" id="errorModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-exclamation-triangle me-2"></i>操作失败
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="errorMessage">操作失败，请重试</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger" data-bs-dismiss="modal">确定</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 显示修改密码模态框
+function showChangePasswordModal() {
+    new bootstrap.Modal(document.getElementById('changePasswordModal')).show();
+}
+
+// 提交密码修改
+async function submitPasswordChange() {
+    const currentPassword = document.getElementById('userCurrentPassword').value;
+    const newPassword = document.getElementById('userNewPassword').value;
+    const confirmPassword = document.getElementById('userConfirmPassword').value;
+    
+    // 验证输入
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        showError('请填写所有密码字段');
+        return;
+    }
+    
+    if (newPassword.length < 6) {
+        showError('新密码长度至少6位');
+        return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+        showError('两次输入的新密码不一致');
+        return;
+    }
+    
+    if (newPassword === currentPassword) {
+        showError('新密码不能与当前密码相同');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/auth/change-password', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // 关闭密码修改模态框
+            bootstrap.Modal.getInstance(document.getElementById('changePasswordModal')).hide();
+            // 清空表单
+            document.getElementById('userChangePasswordForm').reset();
+            showSuccess(result.message || '密码修改成功！');
+        } else {
+            showError(result.message || '密码修改失败');
+        }
+    } catch (error) {
+        showError('网络错误，请重试');
+    }
+}
+
+// 显示成功消息
+function showSuccess(message) {
+    document.getElementById('successMessage').textContent = message;
+    new bootstrap.Modal(document.getElementById('successModal')).show();
+}
+
+// 显示错误消息
+function showError(message) {
+    document.getElementById('errorMessage').textContent = message;
+    new bootstrap.Modal(document.getElementById('errorModal')).show();
+}
+</script>
+
 {% endblock %}

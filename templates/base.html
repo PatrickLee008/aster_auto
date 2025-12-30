@@ -80,7 +80,7 @@
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" href="#">
+                            <a class="nav-link {{ 'active' if request.endpoint == 'main.settings' }}" href="{{ url_for('main.settings') }}">
                                 <i class="fas fa-cogs"></i> 系统设置
                             </a>
                         </li>

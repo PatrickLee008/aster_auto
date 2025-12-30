@@ -1,0 +1,485 @@
+{% extends "base.html" %}
+
+{% block title %}系统设置 - AsterDEX 管理系统{% endblock %}
+
+{% block extra_css %}
+<style>
+    .settings-card {
+        border: none;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .settings-header {
+        background: linear-gradient(45deg, #667eea, #764ba2);
+        color: white;
+        border-radius: 10px 10px 0 0;
+    }
+    .stat-card {
+        background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%);
+        color: white;
+        border-radius: 10px;
+    }
+    .form-control:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+    }
+    .btn-primary {
+        background: linear-gradient(45deg, #667eea, #764ba2);
+        border: none;
+    }
+    .btn-primary:hover {
+        background: linear-gradient(45deg, #5a6fd8, #6a4190);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+        <h1 class="h2"><i class="fas fa-cogs me-2"></i>系统设置</h1>
+    </div>
+
+    <!-- 系统统计 -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card stat-card text-center p-3">
+                <i class="fas fa-users fa-2x mb-2"></i>
+                <h4>{{ stats.total_users or 0 }}</h4>
+                <small>总用户数</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card text-center p-3">
+                <i class="fas fa-user-check fa-2x mb-2"></i>
+                <h4>{{ stats.active_users or 0 }}</h4>
+                <small>活跃用户</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card text-center p-3">
+                <i class="fas fa-globe fa-2x mb-2"></i>
+                <h4>{{ '启用' if stats.proxy_enabled else '禁用' }}</h4>
+                <small>代理状态</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card text-center p-3">
+                <i class="fas fa-shield-alt fa-2x mb-2"></i>
+                <h4>正常</h4>
+                <small>系统状态</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- 管理员设置 -->
+        <div class="col-md-6 mb-4">
+            <div class="card settings-card">
+                <div class="settings-header p-3">
+                    <h5 class="mb-0"><i class="fas fa-user-shield me-2"></i>管理员设置</h5>
+                </div>
+                <div class="card-body">
+                    <!-- 修改密码 -->
+                    <form id="changePasswordForm">
+                        <div class="mb-3">
+                            <label for="currentPassword" class="form-label">
+                                <i class="fas fa-lock me-2"></i>当前密码
+                            </label>
+                            <input type="password" class="form-control" id="currentPassword" 
+                                   placeholder="请输入当前密码" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="newPassword" class="form-label">
+                                <i class="fas fa-key me-2"></i>新密码
+                            </label>
+                            <input type="password" class="form-control" id="newPassword" 
+                                   placeholder="请输入新密码" required minlength="6">
+                        </div>
+                        <div class="mb-3">
+                            <label for="confirmPassword" class="form-label">
+                                <i class="fas fa-check-circle me-2"></i>确认新密码
+                            </label>
+                            <input type="password" class="form-control" id="confirmPassword" 
+                                   placeholder="请再次输入新密码" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i>更新密码
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 系统信息 -->
+        <div class="col-md-6 mb-4">
+            <div class="card settings-card">
+                <div class="settings-header p-3">
+                    <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>系统信息</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-borderless">
+                        <tr>
+                            <td><i class="fas fa-server me-2"></i>系统版本</td>
+                            <td><strong>v1.0.0</strong></td>
+                        </tr>
+                        <tr>
+                            <td><i class="fas fa-database me-2"></i>数据库</td>
+                            <td><strong>MySQL</strong></td>
+                        </tr>
+                        <tr>
+                            <td><i class="fas fa-globe me-2"></i>代理设置</td>
+                            <td>
+                                {% if stats.proxy_enabled %}
+                                    <span class="badge bg-success">已启用</span>
+                                    {% if stats.proxy_info %}
+                                        <br><small class="text-muted">{{ stats.proxy_info.host }}:{{ stats.proxy_info.port }}</small>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge bg-secondary">未启用</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td><i class="fas fa-clock me-2"></i>运行时间</td>
+                            <td><strong id="uptime">计算中...</strong></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志管理 -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card settings-card">
+                <div class="settings-header p-3">
+                    <h5 class="mb-0"><i class="fas fa-file-alt me-2"></i>日志管理</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-folder-open fa-2x text-muted me-3"></i>
+                                <div>
+                                    <h6 class="mb-1">task_logs 文件夹</h6>
+                                    <p class="text-muted small mb-0" id="logsInfo">加载中...</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <button class="btn btn-outline-danger" id="clearLogsBtn" onclick="confirmClearLogs()">
+                                <i class="fas fa-trash-alt me-2"></i>清理所有日志
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- 日志文件列表 -->
+                    <div id="logFilesList" class="mt-3" style="display: none;">
+                        <h6 class="mb-2">最近的日志文件：</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>文件名</th>
+                                        <th>大小</th>
+                                        <th>修改时间</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="logFilesTableBody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 系统操作 -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card settings-card">
+                <div class="settings-header p-3">
+                    <h5 class="mb-0"><i class="fas fa-tools me-2"></i>系统操作</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <button class="btn btn-outline-primary w-100" onclick="refreshLogsInfo()">
+                                <i class="fas fa-sync-alt me-2"></i>刷新日志信息
+                            </button>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <button class="btn btn-outline-warning w-100" onclick="cleanupTasks()">
+                                <i class="fas fa-broom me-2"></i>清理任务
+                            </button>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <button class="btn btn-outline-info w-100" onclick="exportData()">
+                                <i class="fas fa-download me-2"></i>导出数据
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 成功提示模态框 -->
+<div class="modal fade" id="successModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-check-circle me-2"></i>操作成功
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="successMessage">密码修改成功！</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-success" data-bs-dismiss="modal">确定</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 错误提示模态框 -->
+<div class="modal fade" id="errorModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-exclamation-triangle me-2"></i>操作失败
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="errorMessage">操作失败，请重试</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-danger" data-bs-dismiss="modal">确定</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 修改密码
+document.getElementById('changePasswordForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const currentPassword = document.getElementById('currentPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+    
+    // 验证输入
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        showError('请填写所有密码字段');
+        return;
+    }
+    
+    if (newPassword.length < 6) {
+        showError('新密码长度至少6位');
+        return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+        showError('两次输入的新密码不一致');
+        return;
+    }
+    
+    if (newPassword === currentPassword) {
+        showError('新密码不能与当前密码相同');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/auth/change-password', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // 清空表单
+            document.getElementById('changePasswordForm').reset();
+            showSuccess(result.message || '密码修改成功！');
+        } else {
+            showError(result.message || '密码修改失败');
+        }
+    } catch (error) {
+        showError('网络错误，请重试');
+    }
+});
+
+// 显示成功消息
+function showSuccess(message) {
+    document.getElementById('successMessage').textContent = message;
+    new bootstrap.Modal(document.getElementById('successModal')).show();
+}
+
+// 显示错误消息
+function showError(message) {
+    document.getElementById('errorMessage').textContent = message;
+    new bootstrap.Modal(document.getElementById('errorModal')).show();
+}
+
+// 获取日志信息
+async function getLogsInfo() {
+    try {
+        const response = await fetch('/api/get-logs-info');
+        const result = await response.json();
+        
+        if (result.success) {
+            const fileCount = result.file_count;
+            const totalSize = formatFileSize(result.total_size);
+            
+            if (fileCount === 0) {
+                document.getElementById('logsInfo').textContent = '没有日志文件';
+                document.getElementById('clearLogsBtn').disabled = true;
+                document.getElementById('logFilesList').style.display = 'none';
+            } else {
+                document.getElementById('logsInfo').textContent = `共 ${fileCount} 个文件，总大小 ${totalSize}`;
+                document.getElementById('clearLogsBtn').disabled = false;
+                
+                // 显示文件列表
+                if (result.files.length > 0) {
+                    displayLogFiles(result.files);
+                    document.getElementById('logFilesList').style.display = 'block';
+                }
+            }
+        } else {
+            document.getElementById('logsInfo').textContent = '获取日志信息失败';
+        }
+    } catch (error) {
+        document.getElementById('logsInfo').textContent = '网络错误';
+    }
+}
+
+// 显示日志文件列表
+function displayLogFiles(files) {
+    const tbody = document.getElementById('logFilesTableBody');
+    tbody.innerHTML = '';
+    
+    files.forEach(file => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${file.name}</td>
+            <td>${formatFileSize(file.size)}</td>
+            <td>${formatDate(file.modified)}</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+// 格式化文件大小
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// 格式化日期
+function formatDate(timestamp) {
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleString('zh-CN');
+}
+
+// 确认清理日志
+async function confirmClearLogs() {
+    const confirmMsg = '确定要清理所有任务日志文件吗？\n\n此操作将永久删除 task_logs 文件夹中的所有 .log 文件，无法撤销！';
+    
+    if (confirm(confirmMsg)) {
+        await clearLogs();
+    }
+}
+
+// 清理日志
+async function clearLogs() {
+    const btn = document.getElementById('clearLogsBtn');
+    const originalText = btn.innerHTML;
+    
+    // 禁用按钮并显示加载状态
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>清理中...';
+    
+    try {
+        const response = await fetch('/api/clear-logs', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess(result.message || '日志清理成功！');
+            // 刷新日志信息
+            await getLogsInfo();
+        } else {
+            showError(result.message || '日志清理失败');
+        }
+    } catch (error) {
+        showError('网络错误，请重试');
+    } finally {
+        // 恢复按钮状态
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+// 刷新日志信息
+async function refreshLogsInfo() {
+    document.getElementById('logsInfo').textContent = '刷新中...';
+    await getLogsInfo();
+}
+
+async function cleanupTasks() {
+    if (confirm('确定要清理已完成的任务记录吗？此操作不可撤销。')) {
+        showSuccess('任务清理功能开发中...');
+    }
+}
+
+async function exportData() {
+    showSuccess('数据导出功能开发中...');
+}
+
+// 计算运行时间
+function updateUptime() {
+    // 这里可以通过API获取真实的系统运行时间
+    // 暂时显示页面加载时间
+    const startTime = new Date();
+    setInterval(() => {
+        const now = new Date();
+        const diff = now - startTime;
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        document.getElementById('uptime').textContent = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }, 1000);
+}
+
+// 页面加载完成后执行
+document.addEventListener('DOMContentLoaded', function() {
+    updateUptime();
+    getLogsInfo(); // 加载日志信息
+});
+</script>
+{% endblock %}

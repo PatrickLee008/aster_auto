@@ -198,10 +198,18 @@ def delete(user_id):
     
     try:
         username = user.username
+        wallet_count = len(user.wallets)
+        task_count = len(user.tasks)
+        
+        # 删除用户（级联删除钱包和任务）
         db.session.delete(user)
         db.session.commit()
         
-        return jsonify({'success': True, 'message': f'用户 {username} 已删除'})
+        message = f'用户 {username} 已删除'
+        if wallet_count > 0 or task_count > 0:
+            message += f'，同时删除了 {wallet_count} 个钱包和 {task_count} 个任务'
+        
+        return jsonify({'success': True, 'message': message})
         
     except Exception as e:
         db.session.rollback()
