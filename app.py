@@ -33,6 +33,10 @@ def create_app():
     # 初始化数据库
     initialize_database(app)
     
+    # 启动时清理孤儿进程
+    with app.app_context():
+        cleanup_orphan_processes()
+    
     return app
 
 
@@ -145,6 +149,55 @@ def initialize_default_strategies():
             
     except Exception as e:
         print(f"初始化默认策略异常: {e}")
+
+
+def cleanup_orphan_processes():
+    """清理孤儿进程"""
+    try:
+        from services.task_service import TaskService
+        from models.task import Task
+        import psutil
+        
+        print("🧹 检查并清理孤儿进程...")
+        
+        # 获取所有标记为运行中的任务
+        running_tasks = Task.query.filter_by(status='running').all()
+        
+        cleaned_count = 0
+        for task in running_tasks:
+            if task.process_id:
+                try:
+                    # 检查进程是否还存在
+                    if psutil.pid_exists(task.process_id):
+                        proc = psutil.Process(task.process_id)
+                        # 检查是否是我们的进程
+                        if 'python' in proc.name().lower() and 'task_runner.py' in ' '.join(proc.cmdline()):
+                            print(f"✅ 任务 {task.id} 的进程 {task.process_id} 仍在运行")
+                            continue
+                    
+                    # 进程不存在或不是我们的进程，清理任务状态
+                    print(f"🧹 清理孤儿任务 {task.id} (PID: {task.process_id})")
+                    task.update_status('stopped', "服务重启时发现孤儿进程，已清理")
+                    cleaned_count += 1
+                    
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    # 进程不存在或无权访问，清理任务状态
+                    print(f"🧹 清理不存在的任务进程 {task.id} (PID: {task.process_id})")
+                    task.update_status('stopped', "进程不存在，已清理")
+                    cleaned_count += 1
+            else:
+                # 没有进程ID但标记为运行中，清理状态
+                print(f"🧹 清理无进程ID的运行任务 {task.id}")
+                task.update_status('stopped', "无进程ID，状态异常，已清理")
+                cleaned_count += 1
+        
+        if cleaned_count > 0:
+            print(f"🧹 清理完成，共清理了 {cleaned_count} 个孤儿任务")
+        else:
+            print("✅ 没有发现孤儿进程")
+            
+    except Exception as e:
+        print(f"❌ 清理孤儿进程时出错: {e}")
 
 
 def start_app():

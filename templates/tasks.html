@@ -6,6 +6,9 @@
 <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createTaskModal">
     <i class="fas fa-plus"></i> 创建任务
 </button>
+<button type="button" class="btn btn-warning" onclick="cleanupOrphanTasks()">
+    <i class="fas fa-broom"></i> 清理孤儿进程
+</button>
 {% endblock %}
 
 {% block content %}
@@ -831,6 +834,29 @@ function deleteTask(taskId) {
             }
         });
     }
+}
+
+// 清理孤儿任务
+function cleanupOrphanTasks() {
+    if (!confirm('确定要清理孤儿进程吗？这将停止所有进程ID无效或已停止的任务。')) {
+        return;
+    }
+    
+    $.ajax({
+        url: '/api/tasks/cleanup',
+        method: 'POST',
+        success: function(response) {
+            if (response.success) {
+                alert('清理完成：' + response.message);
+                location.reload();
+            } else {
+                alert('清理失败：' + response.message);
+            }
+        },
+        error: function() {
+            alert('网络错误，无法清理孤儿任务');
+        }
+    });
 }
 
 // 定期刷新任务状态

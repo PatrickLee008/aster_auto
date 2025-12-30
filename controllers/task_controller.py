@@ -351,3 +351,22 @@ def list_task_logs():
             'success': False,
             'message': f"获取日志列表异常: {str(e)}"
         }), 500
+
+
+@task_bp.route('/cleanup', methods=['POST'])
+@login_required
+def cleanup_orphan_tasks():
+    """清理孤儿任务API"""
+    try:
+        success, message = TaskService.cleanup_orphan_tasks()
+        
+        return jsonify({
+            'success': success,
+            'message': message
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f"清理孤儿任务异常: {str(e)}"
+        }), 500

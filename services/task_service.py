@@ -394,3 +394,43 @@ class TaskService:
             
         except Exception as e:
             print(f"检查运行中任务失败: {e}")
+    
+    @staticmethod
+    def cleanup_orphan_tasks():
+        """清理孤儿任务（手动清理接口）"""
+        try:
+            import psutil
+            
+            running_tasks = Task.query.filter_by(status='running').all()
+            cleaned_count = 0
+            
+            for task in running_tasks:
+                should_clean = False
+                reason = ""
+                
+                if not task.process_id:
+                    should_clean = True
+                    reason = "无进程ID"
+                else:
+                    try:
+                        if not psutil.pid_exists(task.process_id):
+                            should_clean = True
+                            reason = "进程不存在"
+                        else:
+                            proc = psutil.Process(task.process_id)
+                            cmdline = ' '.join(proc.cmdline())
+                            if 'task_runner.py' not in cmdline:
+                                should_clean = True
+                                reason = "非任务进程"
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        should_clean = True
+                        reason = "进程无法访问"
+                
+                if should_clean:
+                    task.update_status('stopped', f"手动清理: {reason}")
+                    cleaned_count += 1
+            
+            return True, f"清理完成，共清理 {cleaned_count} 个孤儿任务"
+            
+        except Exception as e:
+            return False, f"清理失败: {e}"
