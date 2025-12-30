@@ -387,14 +387,31 @@ class VolumeStrategy:
             )
             
             if result:
-                return result
+                # 检查是否是错误返回
+                if isinstance(result, dict) and result.get('error'):
+                    if 'error_code' in result and 'error_msg' in result:
+                        error_msg = f"卖出订单API错误: 错误码 {result['error_code']}, 错误信息: {result['error_msg']}"
+                        self.log(f"❌ {error_msg}", "error")
+                        raise Exception(f"卖出订单提交失败 - {error_msg}")
+                    else:
+                        error_msg = f"卖出订单失败: HTTP {result.get('status_code', '未知')}, 错误详情: {result.get('error_text', '未知错误')}"
+                        self.log(f"❌ {error_msg}", "error")
+                        raise Exception(f"卖出订单提交失败 - {error_msg}")
+                else:
+                    # 正常的成功返回
+                    return result
             else:
-                self.log(f"卖出订单失败: 无返回结果")
-                return None
+                error_msg = "卖出订单失败: 无返回结果"
+                self.log(f"❌ {error_msg}", "error")
+                raise Exception(f"卖出订单提交失败 - {error_msg}")
                 
         except Exception as e:
-            self.log(f"卖出订单错误: {e}")
-            return None
+            # 如果是我们主动抛出的异常，直接重新抛出
+            if "卖出订单提交失败" in str(e):
+                raise
+            # 其他异常记录并重新抛出
+            self.log(f"卖出订单错误: {e}", "error")
+            raise Exception(f"卖出订单执行异常: {e}")
     
     def place_buy_order(self, price: float, quantity: float = None) -> Optional[Dict[str, Any]]:
         """下达买入订单"""
@@ -421,14 +438,31 @@ class VolumeStrategy:
             )
             
             if result:
-                return result
+                # 检查是否是错误返回
+                if isinstance(result, dict) and result.get('error'):
+                    if 'error_code' in result and 'error_msg' in result:
+                        error_msg = f"买入订单API错误: 错误码 {result['error_code']}, 错误信息: {result['error_msg']}"
+                        self.log(f"❌ {error_msg}", "error")
+                        raise Exception(f"买入订单提交失败 - {error_msg}")
+                    else:
+                        error_msg = f"买入订单失败: HTTP {result.get('status_code', '未知')}, 错误详情: {result.get('error_text', '未知错误')}"
+                        self.log(f"❌ {error_msg}", "error")
+                        raise Exception(f"买入订单提交失败 - {error_msg}")
+                else:
+                    # 正常的成功返回
+                    return result
             else:
-                self.log(f"买入订单失败: 无返回结果")
-                return None
+                error_msg = "买入订单失败: 无返回结果"
+                self.log(f"❌ {error_msg}", "error")
+                raise Exception(f"买入订单提交失败 - {error_msg}")
                 
         except Exception as e:
-            self.log(f"买入订单错误: {e}")
-            return None
+            # 如果是我们主动抛出的异常，直接重新抛出
+            if "买入订单提交失败" in str(e):
+                raise
+            # 其他异常记录并重新抛出
+            self.log(f"买入订单错误: {e}", "error")
+            raise Exception(f"买入订单执行异常: {e}")
     
     def check_order_status(self, order_id: int, max_retries: int = 3) -> Optional[str]:
         """检查订单状态 - 带重试机制"""
@@ -1731,16 +1765,21 @@ class VolumeStrategy:
                     # 立即提交卖出任务
                     sell_future = executor.submit(self.place_sell_order, trade_price)
                     
-                    # 优化延迟为250ms，给订单更好的匹配时间
-                    time.sleep(0.25)  # 250ms延迟
+                    # 优化延迟为20ms，减少延迟提高效率
+                    time.sleep(0.02)  # 20ms延迟
                     buy_future = executor.submit(self.place_buy_order, trade_price)
                     
-                    # 并行等待结果
+                    # 并行等待结果 - 任何订单提交失败都会抛出异常
                     try:
                         sell_order = sell_future.result(timeout=10)
                         buy_order = buy_future.result(timeout=10)
                     except Exception as result_e:
-                        # 如果获取结果失败，等待一下再检查
+                        # 检查是否是订单提交失败的异常
+                        if any(x in str(result_e) for x in ["订单提交失败", "订单执行异常"]):
+                            self.log(f"❌ 订单提交失败，终止任务: {result_e}", "error")
+                            raise Exception(f"任务失败 - {result_e}")
+                        
+                        # 其他异常（如超时等）尝试恢复
                         self.log(f"获取并行结果异常: {result_e}")
                         self.log("等待额外时间确保订单完全处理...")
                         time.sleep(3)
@@ -1754,6 +1793,10 @@ class VolumeStrategy:
                             sell_order = sell_future.result(timeout=2)
                             self.log(f"✅ 延迟获取到卖出订单结果")
                         except Exception as e:
+                            # 检查是否是订单提交失败
+                            if any(x in str(e) for x in ["订单提交失败", "订单执行异常"]):
+                                self.log(f"❌ 卖出订单提交失败，终止任务: {e}", "error")
+                                raise Exception(f"任务失败 - {e}")
                             self.log(f"延迟获取卖出订单结果失败: {e}")
                             sell_order = None
                         
@@ -1762,6 +1805,10 @@ class VolumeStrategy:
                             buy_order = buy_future.result(timeout=2)
                             self.log(f"✅ 延迟获取到买入订单结果")
                         except Exception as e:
+                            # 检查是否是订单提交失败
+                            if any(x in str(e) for x in ["订单提交失败", "订单执行异常"]):
+                                self.log(f"❌ 买入订单提交失败，终止任务: {e}", "error")
+                                raise Exception(f"任务失败 - {e}")
                             self.log(f"延迟获取买入订单结果失败: {e}")
                             buy_order = None
                         
@@ -1776,6 +1823,10 @@ class VolumeStrategy:
                             buy_order = {'orderId': 'unknown_buy'}
                         
             except Exception as e:
+                # 如果是任务失败的异常，直接向上传播
+                if "任务失败" in str(e):
+                    raise
+                # 其他异常记录并跳过本轮
                 self.log(f"执行异常: {e}")
                 self.log("并行执行失败，跳过本轮")
                 return False

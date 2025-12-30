@@ -190,17 +190,24 @@ class SimpleTradingClient:
                 result = response.json()
                 return result
             else:
-                print(f"下单失败: HTTP {response.status_code}")
-                print(f"错误详情: {response.text}")
+                error_msg = f"下单失败: HTTP {response.status_code}"
+                error_detail = f"错误详情: {response.text}"
+                print(error_msg)
+                print(error_detail)
+                
                 # 尝试解析JSON错误信息
                 try:
                     error_json = response.json()
                     if 'code' in error_json and 'msg' in error_json:
-                        print(f"API错误码: {error_json['code']}")
-                        print(f"API错误信息: {error_json['msg']}")
+                        api_error = f"API错误码: {error_json['code']}, 错误信息: {error_json['msg']}"
+                        print(api_error)
+                        # 将错误信息存储到result中，让调用方能够获取并记录到日志
+                        return {'error': True, 'status_code': response.status_code, 
+                               'error_code': error_json['code'], 'error_msg': error_json['msg']}
                 except:
                     pass
-                return None
+                # 如果无法解析JSON，返回基本错误信息
+                return {'error': True, 'status_code': response.status_code, 'error_text': response.text}
                 
         except Exception as e:
             print(f"下单错误: {e}")
