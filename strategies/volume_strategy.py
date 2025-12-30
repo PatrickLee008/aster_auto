@@ -795,20 +795,20 @@ class VolumeStrategy:
                 # 计算本批买入数量
                 current_batch = min(shortage, batch_quantity)
                 
-                # 如果数量小于1，使用5 USDT等价的最小数量
+                # 如果数量小于1，使用5.1 USDT等价的最小数量
                 if current_batch < 1:
-                    min_quantity_for_5usdt = 5.0 / estimated_price
+                    min_quantity_for_5usdt = 5.1 / estimated_price
                     current_batch = max(1, min_quantity_for_5usdt)
-                    print(f"数量不足1个，改为5 USDT等价数量: {current_batch:.2f}")
+                    print(f"数量不足1个，改为5.1 USDT等价数量: {current_batch:.2f}")
                 
                 result = self.place_market_buy_order(current_batch)
                 
                 if not result or result == "ORDER_VALUE_TOO_SMALL":
                     print(f"❌ 第{batch_count + 1}批失败")
-                    # 如果常规批次失败，尝试最小5 USDT购买
+                    # 如果常规批次失败，尝试最小5.1 USDT购买
                     if current_batch >= 1:
-                        min_quantity_for_5usdt = 5.0 / estimated_price
-                        print(f"尝试最小5 USDT购买: {min_quantity_for_5usdt:.2f}")
+                        min_quantity_for_5usdt = 5.1 / estimated_price
+                        print(f"尝试最小5.1 USDT购买: {min_quantity_for_5usdt:.2f}")
                         result = self.place_market_buy_order(min_quantity_for_5usdt)
                         if result and result != "ORDER_VALUE_TOO_SMALL":
                             batch_count += 1
@@ -839,8 +839,15 @@ class VolumeStrategy:
             
             # 最终检查
             final_balance = self.get_asset_balance()
-            if final_balance >= required_quantity:
+            shortage_final = required_quantity - final_balance
+            
+            if shortage_final <= 0:
                 print(f"✅ 补齐完成: {final_balance:.2f} >= {required_quantity:.2f}")
+                self.auto_purchased = total_purchased
+                return True
+            elif shortage_final < 1:
+                # 如果只差不到1个，视为足够（避免因为小数量无法交易而卡住）
+                print(f"⚠️ 余额差异很小({shortage_final:.2f})，视为足够: {final_balance:.2f}")
                 self.auto_purchased = total_purchased
                 return True
             else:
