@@ -419,73 +419,24 @@ class VolumeStrategy:
     def place_market_buy_order(self, quantity: float) -> Optional[Dict[str, Any]]:
         """下达市价买入订单"""
         try:
-            # 检查输入参数
             if quantity <= 0:
-                self.log(f"❌ 无效数量: {quantity}", 'error')
                 return None
             
-            # 获取USDT余额检查
-            account_info = self.client.get_account_info()
-            usdt_balance = 0.0
-            if account_info and 'balances' in account_info:
-                for balance in account_info['balances']:
-                    if balance['asset'] == 'USDT':
-                        usdt_balance = float(balance['free'])
-                        break
-            
-            self.log(f"当前USDT余额: {usdt_balance:.2f}")
-            
-            # 获取当前市场价格来估算需要的USDT
-            book_data = self.get_order_book()
-            if book_data:
-                estimated_price = book_data['ask_price']  # 买入价格使用卖一价
-                estimated_usdt_needed = quantity * estimated_price
-                self.log(f"估算买入价格: {estimated_price:.5f}")
-                self.log(f"估算需要USDT: {estimated_usdt_needed:.2f}")
-                
-                if usdt_balance < estimated_usdt_needed:
-                    self.log(f"❌ USDT余额不足: {usdt_balance:.2f} < {estimated_usdt_needed:.2f}", 'error')
-                    return None
-            
-            # 检查数量是否超出交易所限制
-            # 先尝试使用整数数量
+            # 简化处理：直接使用整数数量
             import math
-            original_quantity = quantity
+            adjusted_quantity = math.floor(quantity)
+            quantity_str = str(int(adjusted_quantity))
             
-            # 尝试不同的数量调整策略
-            quantity_strategies = [
-                math.floor(quantity),  # 向下取整
-                math.ceil(quantity),   # 向上取整
-                round(quantity),       # 四舍五入
-                max(1, math.floor(quantity * 0.9)),  # 减少10%
-                max(1, math.floor(quantity * 0.8)),  # 减少20%
-            ]
+            # 使用专用的市价单客户端
+            result = self.market_client.place_market_buy_order(self.symbol, quantity_str)
             
-            for strategy_idx, adjusted_quantity in enumerate(quantity_strategies):
-                if adjusted_quantity <= 0:
-                    continue
-                    
-                quantity_str = str(int(adjusted_quantity))
-                
-                self.log(f"尝试策略 {strategy_idx + 1}: 原始数量 {original_quantity:.6f} -> 调整数量 {quantity_str}")
-                
-                # 使用专用的市价单客户端
-                result = self.market_client.place_market_buy_order(self.symbol, quantity_str)
-                
-                if result:
-                    self.log(f"✅ 市价买入成功 (策略{strategy_idx + 1}): ID {result.get('orderId')}")
-                    return result
-                else:
-                    self.log(f"策略 {strategy_idx + 1} 失败，尝试下一个", 'warning')
-                    
-            # 所有策略都失败了
-            self.log("❌ 所有数量调整策略都失败", 'error')
-            return "ORDER_VALUE_TOO_SMALL"
+            if result:
+                return result
+            else:
+                return "ORDER_VALUE_TOO_SMALL"
                 
         except Exception as e:
-            self.log(f"❌ 市价买入错误: {type(e).__name__}: {e}", 'error')
-            import traceback
-            self.log(f"详细错误: {traceback.format_exc()}", 'error')
+            self.log(f"市价买入错误: {e}", 'error')
             return None
     
     def place_market_sell_order(self, quantity: float) -> Optional[Dict[str, Any]]:
@@ -791,7 +742,7 @@ class VolumeStrategy:
             return False
     
     def auto_purchase_if_insufficient(self) -> bool:
-        """如果余额不足则自动补齐 - 简化版"""
+        """如果余额不足则自动补齐 - 按USDT价值分批买入"""
         try:
             current_balance = self.get_asset_balance()
             required_quantity = float(self.quantity)
@@ -808,7 +759,7 @@ class VolumeStrategy:
             shortage = required_quantity - current_balance
             print(f"⚠️ 余额不足，缺少: {shortage:.2f}")
             
-            # 检查USDT余额能否支持购买
+            # 检查USDT余额
             account_info = self.client.get_account_info()
             usdt_balance = 0.0
             if account_info and 'balances' in account_info:
@@ -819,71 +770,62 @@ class VolumeStrategy:
             
             print(f"可用USDT余额: {usdt_balance:.2f}")
             
-            # 获取当前价格估算需要的USDT
+            # 获取当前价格
             book_data = self.get_order_book()
             if not book_data:
                 print("❌ 无法获取市场价格")
                 return False
             
             estimated_price = book_data['ask_price']
-            estimated_usdt_needed = shortage * estimated_price
-            print(f"估算买入价格: {estimated_price:.5f}")
-            print(f"估算需要USDT: {estimated_usdt_needed:.2f}")
+            total_usdt_needed = shortage * estimated_price
             
-            if usdt_balance < estimated_usdt_needed:
-                print(f"❌ USDT余额不足，无法补齐: {usdt_balance:.2f} < {estimated_usdt_needed:.2f}")
-                print("💡 请先充值USDT或降低交易数量")
+            if usdt_balance < total_usdt_needed:
+                print(f"❌ USDT余额不足: {usdt_balance:.2f} < {total_usdt_needed:.2f}")
                 return False
             
-            # 分批补齐：避免单次数量过大
-            max_single_purchase = 100.0  # 单次最大购买数量
+            # 按40-50 USDT等价分批买入
+            batch_usdt_value = 45.0  # 每批45 USDT等价
+            batch_quantity = batch_usdt_value / estimated_price
             total_purchased = 0.0
+            batch_count = 0
             
-            while shortage > 0:
-                current_purchase = min(shortage, max_single_purchase)
+            print(f"开始分批补齐，每批约{batch_usdt_value} USDT等价 ({batch_quantity:.2f}个)")
+            
+            while shortage > 0 and total_purchased < required_quantity:
+                # 计算本批买入数量
+                current_batch = min(shortage, batch_quantity)
                 
-                print(f"执行分批补齐，本次数量: {current_purchase:.2f}")
-                result = self.place_market_buy_order(current_purchase)
+                result = self.place_market_buy_order(current_batch)
                 
                 if not result or result == "ORDER_VALUE_TOO_SMALL":
-                    print(f"❌ 分批补齐失败，已补齐: {total_purchased:.2f}")
+                    print(f"❌ 第{batch_count + 1}批失败")
                     break
                 
-                total_purchased += current_purchase
-                shortage -= current_purchase
+                batch_count += 1
+                total_purchased += current_batch
                 
-                # 等待成交
-                time.sleep(1)
-                
-                # 检查实际余额
+                # 等待成交并检查实际余额
+                time.sleep(3)
                 new_balance = self.get_asset_balance()
                 actual_shortage = required_quantity - new_balance
                 
-                print(f"本次补齐后余额: {new_balance:.2f}")
-                print(f"剩余需要补齐: {actual_shortage:.2f}")
+                print(f"第{batch_count}批完成，余额: {new_balance:.2f}")
                 
-                # 如果实际余额已经足够，提前结束
+                # 如果余额已经足够，提前结束
                 if actual_shortage <= 0:
-                    print("✅ 余额已足够，停止补齐")
+                    print("✅ 余额已足够")
                     break
                 
-                # 更新 shortage 为实际需要的数量
                 shortage = actual_shortage
-                
-                # 防止无限循环
-                if total_purchased >= 1000:
-                    print("⚠️ 已购买大量资产，停止补齐防止异常")
-                    break
             
             # 最终检查
             final_balance = self.get_asset_balance()
             if final_balance >= required_quantity:
-                print(f"✅ 余额补齐完成: {final_balance:.2f} >= {required_quantity:.2f}")
-                print(f"总计购买: {total_purchased:.2f}")
-                self.auto_purchased = total_purchased  # 记录自动购买数量
+                print(f"✅ 补齐完成: {final_balance:.2f} >= {required_quantity:.2f}")
+                self.auto_purchased = total_purchased
                 return True
             else:
-                print(f"❌ 余额补齐不完整: {final_balance:.2f} < {required_quantity:.2f}")
+                print(f"❌ 补齐不完整: {final_balance:.2f} < {required_quantity:.2f}")
                 return False
                 
         except Exception as e:
