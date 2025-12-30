@@ -781,8 +781,20 @@ class VolumeStrategy:
             estimated_price = book_data['ask_price']
             total_usdt_needed = shortage * estimated_price
             
+            # 详细调试信息
+            print(f"=== 补齐计算详情 ===")
+            print(f"需要补齐数量: {shortage:.2f}")
+            print(f"当前市场价格 (ask): {estimated_price:.6f}")
+            print(f"估算需要USDT: {total_usdt_needed:.2f}")
+            print(f"可用USDT余额: {usdt_balance:.2f}")
+            print(f"差额: {usdt_balance - total_usdt_needed:.2f}")
+            
             if usdt_balance < total_usdt_needed:
                 print(f"❌ USDT余额不足: {usdt_balance:.2f} < {total_usdt_needed:.2f}")
+                print("💡 请检查:")
+                print(f"  1. 交易数量是否过大: {shortage:.2f} 个")
+                print(f"  2. 市场价格是否正常: {estimated_price:.6f}")
+                print(f"  3. 账户USDT余额是否正确: {usdt_balance:.2f}")
                 return False
             
             # 按40-50 USDT等价分批买入
