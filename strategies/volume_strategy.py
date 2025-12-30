@@ -37,8 +37,8 @@ class VolumeStrategy:
         self.market_client = None  # 市价单客户端
         self.logger = None  # 日志记录器
         
-        # 风险控制参数
-        self.buy_timeout = 0.5  # 买入检查时间(300毫秒)
+        # 风险控制参数 - 优化时间参数提高成交率
+        self.buy_timeout = 1.0  # 买入检查时间(改为1秒，给订单更多成交时间)
         self.max_price_deviation = 0.01  # 最大价格偏差(1%)
         
         # 统计数据
@@ -202,16 +202,18 @@ class VolumeStrategy:
             return None
     
     def generate_trade_price(self, bid_price: float, ask_price: float) -> float:
-        """生成交易价格，在原区间基础上稍微卖高一点点提高命中率"""
+        """生成交易价格，更接近市场中心价提高成交率"""
         if bid_price >= ask_price:
             # 如果买卖价差很小或无价差，使用买一价格作为基准
             base_price = bid_price
         else:
-            # 在买一价格和卖一价格之间生成价格，偏向卖一价格（稍微卖高）
+            # 优化策略：更接近买一卖一的中心价格，提高成交率
             price_range = ask_price - bid_price
-            # 在价格区间的70%-90%位置生成价格，让卖出价格偏高
-            offset = random.uniform(0.7, 0.9)
+            # 改为在价格区间的45%-55%位置生成价格（接近中心）
+            offset = random.uniform(0.45, 0.55)
             base_price = bid_price + (price_range * offset)
+            
+        print(f"价格优化: 买一={bid_price:.5f}, 卖一={ask_price:.5f}, 选择={base_price:.5f}")
         
         # 保留5位小数精度
         trade_price = round(base_price, 5)
@@ -1028,9 +1030,15 @@ class VolumeStrategy:
         print(f"\n=== 第 {round_num}/{self.rounds} 轮交易 ===")
         self.log(f"开始执行第 {round_num} 轮交易", 'info')
         
+        # 初始化本轮状态
+        round_completed = False
+        
         try:
             # 使用策略开始时记录的初始余额作为基准
             initial_balance = self.initial_balance
+            
+            # 强制日志：关键检查点
+            self.log(f"=== 第{round_num}轮: 开始获取订单薄 ===", 'info')
             
             # 1. 获取当前订单薄
             book_data = self.get_order_book()
@@ -1038,11 +1046,16 @@ class VolumeStrategy:
                 self.log("无法获取订单薄，跳过本轮", 'error')
                 return False
             
+            self.log(f"=== 第{round_num}轮: 订单薄获取成功，开始生成价格 ===", 'info')
+            
             # 2. 生成交易价格（偏向高价提高命中率）
             trade_price = self.generate_trade_price(
                 book_data['bid_price'],  # 买一价格
                 book_data['ask_price']   # 卖一价格
             )
+            
+            # 强制日志：价格生成完成
+            self.log(f"=== 第{round_num}轮: 价格生成完成 {trade_price:.5f}, 开始下单 ===", 'info')
             
             # 3. 有序快速执行：先发起卖出，立即发起买入
             print(f"有序提交订单: {self.quantity} {self.symbol} @ {trade_price:.5f}")
@@ -1050,8 +1063,11 @@ class VolumeStrategy:
             import threading
             import time
             
-            print("执行顺序: 卖出 -> 买入 (50毫秒延迟)")
+            print("执行顺序: 卖出 -> 买入 (250毫秒延迟)")
             start_time = time.time()
+            
+            # 强制日志：即将下单
+            self.log(f"=== 第{round_num}轮: 即将提交双向订单 ===", 'info')
             
             # 用于存储订单结果的变量
             sell_order = None
@@ -1067,8 +1083,8 @@ class VolumeStrategy:
                     # 立即提交卖出任务
                     sell_future = executor.submit(self.place_sell_order, trade_price)
                     
-                    # 50ms延迟后提交买入任务
-                    time.sleep(0.020)  # 50ms延迟
+                    # 优化延迟为250ms，给订单更好的匹配时间
+                    time.sleep(0.25)  # 250ms延迟
                     buy_future = executor.submit(self.place_buy_order, trade_price)
                     
                     # 并行等待结果
@@ -1119,6 +1135,9 @@ class VolumeStrategy:
             end_time = time.time()
             print(f"有序下单耗时: {(end_time - start_time)*1000:.0f}毫秒")
             
+            # 强制日志：下单完成
+            self.log(f"=== 第{round_num}轮: 双向下单完成，开始检查结果 ===", 'info')
+            
             # 4. 检查异常和订单提交结果
             if sell_exception:
                 print(f"❌ 卖出订单异常: {sell_exception}")
@@ -1161,12 +1180,18 @@ class VolumeStrategy:
             else:
                 print(f"✅ 订单提交成功 - 卖出:{sell_order_id} 买入:{buy_order_id}")
             
+            # 强制日志：开始状态检查
+            self.log(f"=== 第{round_num}轮: 开始检查订单状态 ===", 'info')
+            
             # 6. 等待300毫秒后检查订单成交状态（仅当有有效订单ID时）
             time.sleep(self.buy_timeout)  # 等待300毫秒
             
             # 检查买入和卖出订单状态
             buy_status = self.check_order_status(buy_order_id)
             sell_status = self.check_order_status(sell_order_id)
+            
+            # 强制日志：状态检查完成
+            self.log(f"=== 第{round_num}轮: 状态检查完成 买入:{buy_status} 卖出:{sell_status} ===", 'info')
             
             # 获取详细订单信息以查看执行数量
             buy_details = self.get_order_details(buy_order_id)
@@ -1203,7 +1228,10 @@ class VolumeStrategy:
             if buy_filled and sell_filled:
                 print("✅ 买卖订单都已成交，无需补单，直接进入下一轮")
                 # 买卖都成交，理论上余额平衡，无需检查
-                print(f"第 {round_num} 轮交易完成")
+                round_completed = True
+                self.completed_rounds += 1
+                print(f"✅ 第 {round_num} 轮交易完成")
+                self.log(f"第 {round_num} 轮交易双向成交完成", 'info')
                 return True
                 
             elif sell_filled and (not buy_filled or buy_partially):
@@ -1234,6 +1262,7 @@ class VolumeStrategy:
                     return False
                 print("✅ 买入补单完成，数量已平衡")
                 # 统计完成的轮次
+                round_completed = True
                 self.completed_rounds += 1
                 print(f"✅ 第 {round_num} 轮交易完成")
                 self.log(f"第 {round_num} 轮交易通过买入补单完成", 'info')
@@ -1267,6 +1296,7 @@ class VolumeStrategy:
                     return False
                 print("✅ 卖出补单完成，数量已平衡")
                 # 统计完成的轮次
+                round_completed = True
                 self.completed_rounds += 1
                 print(f"✅ 第 {round_num} 轮交易完成")
                 self.log(f"第 {round_num} 轮交易通过卖出补单完成", 'info')
@@ -1296,6 +1326,7 @@ class VolumeStrategy:
                 
                 print("✅ 部分成交补单完成")
                 # 统计完成的轮次
+                round_completed = True
                 self.completed_rounds += 1
                 print(f"✅ 第 {round_num} 轮交易完成")
                 self.log(f"第 {round_num} 轮交易通过部分成交补单完成", 'info')
@@ -1323,6 +1354,7 @@ class VolumeStrategy:
                         print("💡 余额增加，可能有买入成交，执行卖出补单")
                         success = self.smart_sell_order(trade_price, abs(balance_change))
                         if success:
+                            round_completed = True
                             self.completed_rounds += 1
                             print(f"✅ 第 {round_num} 轮交易完成")
                             self.log(f"第 {round_num} 轮交易通过余额判断卖出补单完成", 'info')
@@ -1331,6 +1363,7 @@ class VolumeStrategy:
                         print("💡 余额减少，可能有卖出成交，执行买入补单")
                         success = self.smart_buy_order(trade_price, abs(balance_change))
                         if success:
+                            round_completed = True
                             self.completed_rounds += 1
                             print(f"✅ 第 {round_num} 轮交易完成")
                             self.log(f"第 {round_num} 轮交易通过余额判断买入补单完成", 'info')
@@ -1344,16 +1377,23 @@ class VolumeStrategy:
                     print("ℹ️ 所有未成交订单已取消，本轮结束")
                     return False
                 
-            # 统计完成的轮次
-            self.completed_rounds += 1
-            print(f"✅ 第 {round_num} 轮交易完成")
-            self.log(f"第 {round_num} 轮交易成功完成，双向成交", 'info')
+            # 这里不应该到达，但如果到达了就标记为完成
+            if not round_completed:
+                round_completed = True
+                self.completed_rounds += 1
+                print(f"✅ 第 {round_num} 轮交易完成")
+                self.log(f"第 {round_num} 轮交易成功完成", 'info')
             return True
             
         except Exception as e:
             print(f"交易轮次错误: {e}")
             self.log(f"第 {round_num} 轮交易出现异常: {e}", 'error')
             return False
+        
+        finally:
+            # 确保每一轮都有日志输出，便于调试
+            if not round_completed:
+                self.log(f"第 {round_num} 轮交易结束 (未完成)", 'warning')
     
     def run(self) -> bool:
         """运行策略"""
