@@ -333,25 +333,22 @@ class SimpleTradingClient:
         try:
             server_time = self.get_server_time()
             
-            params = {
-                'timestamp': server_time,
-                'recvWindow': 60000
-            }
-            
-            # 如果指定了交易对，添加到参数中
+            # 构造参数，使用与get_account_info相同的模式
             if symbol:
-                params['symbol'] = symbol
+                query_string = f"symbol={symbol}&timestamp={server_time}&recvWindow=60000"
+                params = {
+                    'symbol': symbol,
+                    'timestamp': server_time,
+                    'recvWindow': 60000
+                }
+            else:
+                query_string = f"timestamp={server_time}&recvWindow=60000"
+                params = {
+                    'timestamp': server_time,
+                    'recvWindow': 60000
+                }
             
-            # 生成查询字符串
-            query_parts = []
-            if symbol:
-                query_parts.append(f"symbol={symbol}")
-            query_parts.append(f"timestamp={server_time}")
-            query_parts.append(f"recvWindow=60000")
-            
-            query_string = "&".join(query_parts)
-            
-            # 生成签名
+            # 生成签名 - 使用与get_account_info完全相同的方法
             signature = hmac.new(
                 self.secret_key.encode('utf-8'),
                 query_string.encode('utf-8'),
