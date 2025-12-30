@@ -304,6 +304,29 @@ class SimpleTradingClient:
         except Exception as e:
             print(f"查询订单错误: {e}")
             return None
+    
+    def get_exchange_info(self, symbol: str = None) -> Optional[Dict[str, Any]]:
+        """获取交易所信息，包括交易对的精度要求"""
+        try:
+            url = f"{self.host}/api/v1/exchangeInfo"
+            if symbol:
+                url += f"?symbol={symbol}"
+            
+            response = requests.get(
+                url,
+                proxies=self.proxies,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"获取交易所信息失败: {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"获取交易所信息错误: {e}")
+            return None
 
 if __name__ == '__main__':
     # 测试简化客户端

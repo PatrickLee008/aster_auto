@@ -52,6 +52,11 @@ class VolumeStrategy:
         # 订单跟踪 - 用于检查卡单
         self.pending_orders = []     # 记录当前轮次的订单ID
         
+        # 交易对精度信息
+        self.symbol_info = None      # 交易对信息
+        self.tick_size = None        # 价格精度
+        self.step_size = None        # 数量精度
+        
         print(f"=== 刷量策略初始化 ===")
         print(f"交易对: {symbol}")
         print(f"数量: {quantity}")
@@ -75,6 +80,87 @@ class VolumeStrategy:
         else:
             print(message)
     
+    def get_symbol_precision(self) -> bool:
+        """获取交易对的精度信息"""
+        try:
+            print(f"获取交易对 {self.symbol} 的精度信息...")
+            
+            # 获取交易所信息
+            exchange_info = self.client.get_exchange_info(self.symbol)
+            if not exchange_info:
+                print("❌ 无法获取交易所信息")
+                return False
+            
+            # 查找对应的交易对信息
+            symbols = exchange_info.get('symbols', [])
+            for symbol_info in symbols:
+                if symbol_info.get('symbol') == self.symbol:
+                    self.symbol_info = symbol_info
+                    
+                    # 提取价格和数量精度信息
+                    filters = symbol_info.get('filters', [])
+                    for filter_item in filters:
+                        if filter_item.get('filterType') == 'PRICE_FILTER':
+                            self.tick_size = filter_item.get('tickSize')
+                        elif filter_item.get('filterType') == 'LOT_SIZE':
+                            self.step_size = filter_item.get('stepSize')
+                    
+                    print(f"✅ 交易对精度信息获取成功:")
+                    print(f"   价格精度 (tick_size): {self.tick_size}")
+                    print(f"   数量精度 (step_size): {self.step_size}")
+                    return True
+            
+            print(f"❌ 未找到交易对 {self.symbol} 的信息")
+            return False
+            
+        except Exception as e:
+            print(f"❌ 获取交易对精度信息失败: {e}")
+            return False
+    
+    def format_price(self, price: float) -> str:
+        """根据tick_size格式化价格"""
+        if not self.tick_size:
+            return f"{price:.5f}"  # 默认5位小数
+            
+        try:
+            tick_size_float = float(self.tick_size)
+            if tick_size_float == 0:
+                return str(price)
+            
+            # 计算精度位数
+            precision = len(self.tick_size.rstrip('0').split('.')[1]) if '.' in self.tick_size else 0
+            
+            # 根据tick_size调整价格
+            adjusted_price = round(round(price / tick_size_float) * tick_size_float, precision)
+            
+            return f"{adjusted_price:.{precision}f}"
+            
+        except Exception as e:
+            print(f"价格格式化失败: {e}")
+            return f"{price:.5f}"  # 降级到默认格式
+    
+    def format_quantity(self, quantity: float) -> str:
+        """根据step_size格式化数量"""
+        if not self.step_size:
+            return f"{quantity:.2f}"  # 默认2位小数
+            
+        try:
+            step_size_float = float(self.step_size)
+            if step_size_float == 0:
+                return str(quantity)
+            
+            # 计算精度位数
+            precision = len(self.step_size.rstrip('0').split('.')[1]) if '.' in self.step_size else 0
+            
+            # 根据step_size调整数量
+            adjusted_quantity = round(round(quantity / step_size_float) * step_size_float, precision)
+            
+            return f"{adjusted_quantity:.{precision}f}"
+            
+        except Exception as e:
+            print(f"数量格式化失败: {e}")
+            return f"{quantity:.2f}"  # 降级到默认格式
+
     def connect(self) -> bool:
         """连接交易所"""
         try:
@@ -107,6 +193,10 @@ class VolumeStrategy:
             
             if self.client.test_connection():
                 print("交易所连接成功")
+                
+                # 获取交易对精度信息
+                if not self.get_symbol_precision():
+                    print("⚠️ 无法获取交易对精度信息，将使用默认精度")
                 
                 # 预热连接 - 获取一次服务器时间以稳定连接
                 print("预热网络连接...")
@@ -218,8 +308,11 @@ class VolumeStrategy:
             
         print(f"价格优化: 买一={bid_price:.5f}, 卖一={ask_price:.5f}, 选择={base_price:.5f}")
         
-        # 保留5位小数精度
-        trade_price = round(base_price, 5)
+        # 使用正确的tick size格式化价格
+        formatted_price = self.format_price(base_price)
+        trade_price = float(formatted_price)
+        
+        print(f"价格精度调整: {base_price:.8f} -> {trade_price:.8f} (tick_size: {self.tick_size})")
         
         # 检查订单价值是否满足5 USDT最小限制
         order_value = trade_price * float(self.quantity)
@@ -235,13 +328,13 @@ class VolumeStrategy:
     def place_sell_order(self, price: float) -> Optional[Dict[str, Any]]:
         """下达卖出订单"""
         try:
-            # 确保数量精度正确(ASTER通常2位小数)
+            # 确保数量精度正确，使用交易对的step_size
             import math
             adjusted_quantity = math.floor(float(self.quantity) * 100) / 100
-            quantity_str = f"{adjusted_quantity:.2f}"
+            quantity_str = self.format_quantity(adjusted_quantity)
             
-            # 格式化价格为5位小数以保持精度
-            price_str = f"{price:.5f}"
+            # 格式化价格，使用交易对的tick_size
+            price_str = self.format_price(price)
             
             result = self.client.place_order(
                 symbol=self.symbol,
@@ -269,13 +362,13 @@ class VolumeStrategy:
             if quantity is None:
                 quantity = float(self.quantity)
             
-            # 确保数量精度正确(SENTIS通常2位小数)
+            # 确保数量精度正确，使用交易对的step_size
             import math
             adjusted_quantity = math.floor(quantity * 100) / 100
-            quantity_str = f"{adjusted_quantity:.2f}"
+            quantity_str = self.format_quantity(adjusted_quantity)
             
-            # 格式化价格为5位小数以保持精度
-            price_str = f"{price:.5f}"
+            # 格式化价格，使用交易对的tick_size
+            price_str = self.format_price(price)
             
             result = self.client.place_order(
                 symbol=self.symbol,
