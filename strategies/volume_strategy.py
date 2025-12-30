@@ -948,28 +948,51 @@ class VolumeStrategy:
                 return False
             
             # 根据价值确定分批策略
-            if total_usdt_needed <= 60:
-                # 价值 <= 60 USDT：一次性全部买入
+            if total_usdt_needed < 5.0:
+                # 价值 < 5 USDT：直接购买6 USDT价值的现货
+                target_usdt_value = 6.0
+                target_quantity = target_usdt_value / estimated_price
+                max_batches = 1
+                batch_quantity = target_quantity
+                print(f"价值 < 5 USDT ({total_usdt_needed:.2f})，改为购买6 USDT价值现货: {target_quantity:.2f}个")
+                is_small_purchase = True
+            elif total_usdt_needed <= 60:
+                # 价值 5-60 USDT：一次性全部买入
                 max_batches = 1
                 batch_quantity = shortage
-                print(f"价值 <= 60 USDT ({total_usdt_needed:.2f})，一次性买入: {shortage:.2f}个")
+                print(f"价值5-60 USDT ({total_usdt_needed:.2f})，一次性买入: {shortage:.2f}个")
+                is_small_purchase = False
             elif total_usdt_needed <= 500:
                 # 价值 60-500 USDT：分5批买入
                 max_batches = 5
                 batch_quantity = shortage / max_batches
                 print(f"价值60-500 USDT ({total_usdt_needed:.2f})，分{max_batches}批买入，每批约: {batch_quantity:.2f}个")
+                is_small_purchase = False
             else:
                 # 价值 > 500 USDT：分10批买入
                 max_batches = 10
                 batch_quantity = shortage / max_batches
                 print(f"价值 > 500 USDT ({total_usdt_needed:.2f})，分{max_batches}批买入，每批约: {batch_quantity:.2f}个")
+                is_small_purchase = False
             
             total_purchased = 0.0
             batch_count = 0
             
-            while shortage > 0 and total_purchased < required_quantity and batch_count < max_batches:
+            # 对于小金额补货(< 5 USDT)，目标是购买6 USDT价值，可能超过required_quantity
+            if is_small_purchase:
+                target_purchase = target_quantity
+                print(f"小金额补货：目标购买 {target_purchase:.2f} 个 (6 USDT 价值)")
+            else:
+                target_purchase = required_quantity
+            
+            while shortage > 0 and total_purchased < target_purchase and batch_count < max_batches:
                 # 计算本批买入数量
-                current_batch = min(shortage, batch_quantity)
+                if is_small_purchase:
+                    # 小金额补货时，直接购买目标数量
+                    current_batch = batch_quantity
+                else:
+                    # 正常情况，不超过剩余缺口
+                    current_batch = min(shortage, batch_quantity)
                 
                 # 如果数量小于1，使用5.1 USDT等价的最小数量
                 if current_batch < 1:
