@@ -882,7 +882,6 @@ class VolumeStrategy:
                             fee = self._calculate_fee_from_order_result(order_info, is_maker=False)
                             # 更新统计数据
                             self._update_trade_statistics('BUY', executed_qty, avg_price, fee)
-                            # 市价买单统计已更新
                     else:
                         # 如果无法获取详细信息，使用估算值
                         ticker = self.client.get_book_ticker(self.symbol)
@@ -894,7 +893,6 @@ class VolumeStrategy:
                                     self.get_commission_rates()
                                 fee = adjusted_quantity * estimated_price * (self.taker_fee_rate or 0.0004)
                                 self._update_trade_statistics('BUY', adjusted_quantity, estimated_price, fee)
-                                # 市价买单统计已更新(估算)
                 else:
                     # 备用方案：使用当前市价估算
                     ticker = self.client.get_book_ticker(self.symbol)
@@ -906,7 +904,6 @@ class VolumeStrategy:
                                 self.get_commission_rates()
                             fee = adjusted_quantity * estimated_price * (self.taker_fee_rate or 0.0004)
                             self._update_trade_statistics('BUY', adjusted_quantity, estimated_price, fee)
-                            # 市价买单统计已更新(备用)
                 
                 return result
             else:
@@ -955,7 +952,6 @@ class VolumeStrategy:
                             fee = self._calculate_fee_from_order_result(order_info, is_maker=False)
                             # 更新统计数据
                             self._update_trade_statistics('SELL', executed_qty, avg_price, fee)
-                            # 市价卖单统计已更新
                     else:
                         # 如果无法获取详细信息，使用估算值
                         ticker = self.client.get_book_ticker(self.symbol)
@@ -967,7 +963,6 @@ class VolumeStrategy:
                                     self.get_commission_rates()
                                 fee = adjusted_quantity * estimated_price * (self.taker_fee_rate or 0.0004)
                                 self._update_trade_statistics('SELL', adjusted_quantity, estimated_price, fee)
-                                # 市价卖单统计已更新(估算)
                 else:
                     # 备用方案：使用当前市价估算
                     ticker = self.client.get_book_ticker(self.symbol)
@@ -979,7 +974,6 @@ class VolumeStrategy:
                                 self.get_commission_rates()
                             fee = adjusted_quantity * estimated_price * (self.taker_fee_rate or 0.0004)
                             self._update_trade_statistics('SELL', adjusted_quantity, estimated_price, fee)
-                            # 市价卖单统计已更新(备用)
                 
                 return result
             else:
@@ -1906,6 +1900,9 @@ class VolumeStrategy:
                 
             elif sell_filled and (not buy_filled or buy_partially):
                 # 卖出完全成交，买入未成交或部分成交
+                # 先统计已成交的卖单
+                self._update_filled_order_statistics(sell_order_id, 'SELL')
+                
                 if buy_partially:
                     self.log(f"❌ 卖出已成交，买入部分成交 ({buy_executed}/{buy_original}) - 取消买单，补足剩余数量", "error")
                     remaining_buy = buy_original - buy_executed
@@ -1946,6 +1943,9 @@ class VolumeStrategy:
                 
             elif buy_filled and (not sell_filled or sell_partially):
                 # 买入完全成交，卖出未成交或部分成交
+                # 先统计已成交的买单
+                self._update_filled_order_statistics(buy_order_id, 'BUY')
+                
                 if sell_partially:
                     self.log(f"❌ 买入已成交，卖出部分成交 ({sell_executed}/{sell_original}) - 取消卖单，补足剩余数量", "error")
                     remaining_sell = sell_original - sell_executed
@@ -1987,6 +1987,10 @@ class VolumeStrategy:
             elif buy_partially and sell_partially:
                 # 都是部分成交的情况
                 self.log(f"⚠️ 买卖都部分成交 - 买入: {buy_executed}/{buy_original}, 卖出: {sell_executed}/{sell_original}", "warning")
+                
+                # 统计已成交的部分
+                self._update_filled_order_statistics(buy_order_id, 'BUY')
+                self._update_filled_order_statistics(sell_order_id, 'SELL')
                 
                 remaining_buy = buy_original - buy_executed
                 remaining_sell = sell_original - sell_executed
