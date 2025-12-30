@@ -327,6 +327,102 @@ class SimpleTradingClient:
         except Exception as e:
             print(f"获取交易所信息错误: {e}")
             return None
+    
+    def get_open_orders(self, symbol: str = None) -> Optional[Dict[str, Any]]:
+        """获取当前未成交订单"""
+        try:
+            server_time = self.get_server_time()
+            
+            params = {
+                'timestamp': server_time,
+                'recvWindow': 60000
+            }
+            
+            # 如果指定了交易对，添加到参数中
+            if symbol:
+                params['symbol'] = symbol
+            
+            # 生成查询字符串
+            query_parts = []
+            if symbol:
+                query_parts.append(f"symbol={symbol}")
+            query_parts.append(f"timestamp={server_time}")
+            query_parts.append(f"recvWindow=60000")
+            
+            query_string = "&".join(query_parts)
+            
+            # 生成签名
+            signature = hmac.new(
+                self.secret_key.encode('utf-8'),
+                query_string.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+            
+            params['signature'] = signature
+            
+            response = requests.get(
+                f"{self.host}/api/v1/openOrders",
+                params=params,
+                headers={'X-MBX-APIKEY': self.api_key},
+                proxies=self.proxies,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"获取未成交订单失败: {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"获取未成交订单错误: {e}")
+            return None
+    
+    def get_commission_rate(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """获取交易对的手续费率"""
+        try:
+            server_time = self.get_server_time()
+            
+            params = {
+                'symbol': symbol,
+                'timestamp': server_time,
+                'recvWindow': 60000
+            }
+            
+            # 生成查询字符串
+            query_parts = []
+            query_parts.append(f"symbol={symbol}")
+            query_parts.append(f"timestamp={server_time}")
+            query_parts.append(f"recvWindow=60000")
+            
+            query_string = "&".join(query_parts)
+            
+            # 生成签名
+            signature = hmac.new(
+                self.secret_key.encode('utf-8'),
+                query_string.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+            
+            params['signature'] = signature
+            
+            response = requests.get(
+                f"{self.host}/api/v1/commissionRate",
+                params=params,
+                headers={'X-MBX-APIKEY': self.api_key},
+                proxies=self.proxies,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"获取手续费率失败: {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"获取手续费率错误: {e}")
+            return None
 
 if __name__ == '__main__':
     # 测试简化客户端

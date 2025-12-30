@@ -212,11 +212,14 @@ class TaskRunner:
             }
     
     def update_task_stats(self, total_rounds=0, successful_rounds=0, failed_rounds=0, 
-                          supplement_orders=0, total_cost_diff=0):
+                          supplement_orders=0, total_cost_diff=0, buy_volume_usdt=0,
+                          sell_volume_usdt=0, total_fees_usdt=0, initial_usdt_balance=None,
+                          final_usdt_balance=None, usdt_balance_diff=0, net_loss_usdt=0):
         """更新任务统计信息"""
         try:
             with self.app.app_context():
                 from models.base import db
+                from decimal import Decimal
                 task = db.session.get(Task, self.task_id)
                 if task:
                     # 更新基础统计
@@ -227,12 +230,27 @@ class TaskRunner:
                     if failed_rounds > 0:
                         task.failed_rounds = failed_rounds
                     
-                    # 更新新的统计字段
+                    # 更新原有的统计字段
                     if supplement_orders > 0:
                         task.supplement_orders = supplement_orders
                     if total_cost_diff > 0:
-                        from decimal import Decimal
                         task.total_cost_diff = Decimal(str(total_cost_diff))
+                    
+                    # 更新新的交易量和手续费统计字段
+                    if buy_volume_usdt > 0:
+                        task.buy_volume_usdt = Decimal(str(buy_volume_usdt))
+                    if sell_volume_usdt > 0:
+                        task.sell_volume_usdt = Decimal(str(sell_volume_usdt))
+                    if total_fees_usdt > 0:
+                        task.total_fees_usdt = Decimal(str(total_fees_usdt))
+                    if initial_usdt_balance is not None:
+                        task.initial_usdt_balance = Decimal(str(initial_usdt_balance))
+                    if final_usdt_balance is not None:
+                        task.final_usdt_balance = Decimal(str(final_usdt_balance))
+                    if usdt_balance_diff != 0:
+                        task.usdt_balance_diff = Decimal(str(usdt_balance_diff))
+                    if net_loss_usdt != 0:
+                        task.net_loss_usdt = Decimal(str(net_loss_usdt))
                     
                     db.session.commit()
                     
@@ -316,15 +334,34 @@ class TaskRunner:
                         supplement_orders = getattr(strategy_instance, 'supplement_orders', 0)
                         total_cost_diff = getattr(strategy_instance, 'total_cost_diff', 0)
                         
+                        # 获取新的统计数据
+                        buy_volume_usdt = getattr(strategy_instance, 'buy_volume_usdt', 0)
+                        sell_volume_usdt = getattr(strategy_instance, 'sell_volume_usdt', 0)
+                        total_fees_usdt = getattr(strategy_instance, 'total_fees_usdt', 0)
+                        initial_usdt_balance = getattr(strategy_instance, 'initial_usdt_balance', None)
+                        final_usdt_balance = getattr(strategy_instance, 'final_usdt_balance', None)
+                        usdt_balance_diff = getattr(strategy_instance, 'usdt_balance_diff', 0)
+                        net_loss_usdt = getattr(strategy_instance, 'net_loss_usdt', 0)
+                        
                         self.update_task_stats(
                             total_rounds=total_rounds,
                             successful_rounds=total_rounds,  # 完成的轮次都算成功
                             failed_rounds=0,
                             supplement_orders=supplement_orders,
-                            total_cost_diff=total_cost_diff
+                            total_cost_diff=total_cost_diff,
+                            buy_volume_usdt=buy_volume_usdt,
+                            sell_volume_usdt=sell_volume_usdt,
+                            total_fees_usdt=total_fees_usdt,
+                            initial_usdt_balance=initial_usdt_balance,
+                            final_usdt_balance=final_usdt_balance,
+                            usdt_balance_diff=usdt_balance_diff,
+                            net_loss_usdt=net_loss_usdt
                         )
                         
+                        total_volume = buy_volume_usdt + sell_volume_usdt
                         self.logger.info(f"策略统计 - 完成轮次: {total_rounds}, 补单数: {supplement_orders}, 总损耗: {total_cost_diff:.4f} USDT")
+                        self.logger.info(f"交易统计 - 总交易量: {total_volume:.2f} USDT, 手续费: {total_fees_usdt:.4f} USDT")
+                        self.logger.info(f"USDT余额 - 差值: {usdt_balance_diff:+.4f}, 净损耗: {net_loss_usdt:+.4f} USDT")
                 else:
                     self.logger.error("策略执行失败！")
                     self.update_task_status('error', '策略执行失败')

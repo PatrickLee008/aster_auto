@@ -49,6 +49,15 @@ class VolumeStrategy:
         self.total_cost_diff = 0.0   # 总损耗（价格差累计）
         self.auto_purchased = 0.0    # 自动购买的数量（需要最终卖出）
         
+        # 新增交易量和手续费统计
+        self.buy_volume_usdt = 0.0   # 买单总交易量(USDT)
+        self.sell_volume_usdt = 0.0  # 卖单总交易量(USDT) 
+        self.total_fees_usdt = 0.0   # 总手续费(USDT)
+        self.initial_usdt_balance = 0.0  # 策略开始时的USDT余额
+        self.final_usdt_balance = 0.0    # 策略结束时的USDT余额
+        self.usdt_balance_diff = 0.0     # USDT余额差值
+        self.net_loss_usdt = 0.0         # 净损耗(USDT) = 余额差值 - 总手续费
+        
         # 订单跟踪 - 用于检查卡单
         self.pending_orders = []     # 记录当前轮次的订单ID
         
@@ -56,6 +65,11 @@ class VolumeStrategy:
         self.symbol_info = None      # 交易对信息
         self.tick_size = None        # 价格精度
         self.step_size = None        # 数量精度
+        
+        # 手续费率信息
+        self.maker_fee_rate = None   # Maker费率
+        self.taker_fee_rate = None   # Taker费率
+        self.fee_rates_loaded = False # 是否已加载费率
         
         print(f"=== 刷量策略初始化 ===")
         print(f"交易对: {symbol}")
@@ -115,6 +129,41 @@ class VolumeStrategy:
             
         except Exception as e:
             print(f"❌ 获取交易对精度信息失败: {e}")
+            return False
+    
+    def get_commission_rates(self) -> bool:
+        """获取交易对的真实手续费率"""
+        try:
+            if self.fee_rates_loaded:
+                print(f"✅ 手续费率已缓存: Maker={self.maker_fee_rate}, Taker={self.taker_fee_rate}")
+                return True
+                
+            print(f"🔍 获取交易对 {self.symbol} 的手续费率...")
+            
+            # 获取手续费率信息
+            commission_info = self.client.get_commission_rate(self.symbol)
+            if not commission_info:
+                print("❌ 无法获取手续费率信息，使用默认费率")
+                return False
+            
+            # 提取费率信息
+            self.maker_fee_rate = float(commission_info.get('makerCommissionRate', '0.001'))
+            self.taker_fee_rate = float(commission_info.get('takerCommissionRate', '0.001'))
+            self.fee_rates_loaded = True
+            
+            print(f"✅ 手续费率获取成功:")
+            print(f"   Maker费率: {self.maker_fee_rate:.6f} ({self.maker_fee_rate*100:.4f}%)")
+            print(f"   Taker费率: {self.taker_fee_rate:.6f} ({self.taker_fee_rate*100:.4f}%)")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ 获取手续费率错误: {e}")
+            # 设置默认费率作为降级方案
+            self.maker_fee_rate = 0.001  # 0.1%
+            self.taker_fee_rate = 0.001  # 0.1%
+            self.fee_rates_loaded = True
+            print(f"⚠️ 使用默认手续费率: Maker=0.1%, Taker=0.1%")
             return False
     
     def format_price(self, price: float) -> str:
@@ -198,6 +247,10 @@ class VolumeStrategy:
                 if not self.get_symbol_precision():
                     print("⚠️ 无法获取交易对精度信息，将使用默认精度")
                 
+                # 获取交易对手续费率
+                if not self.get_commission_rates():
+                    print("⚠️ 无法获取真实手续费率，将使用默认费率")
+                
                 # 预热连接 - 获取一次服务器时间以稳定连接
                 print("预热网络连接...")
                 for i in range(2):
@@ -211,7 +264,7 @@ class VolumeStrategy:
                     time.sleep(0.5)
                 
                 # 检查账户余额 - 根据交易对自动检测
-                base_asset = self.symbol.replace('USDT', '')  # 从SENTISUSDT获取SENTIS
+                base_asset = self.symbol.replace('USDT', '')  # 从交易对获取基础资产，如SENTISUSDT→SENTIS
                 account_info = self.client.get_account_info()
                 if account_info and 'balances' in account_info:
                     usdt_balance = 0.0
@@ -450,7 +503,7 @@ class VolumeStrategy:
         """获取交易资产的当前余额 - 带重试机制"""
         for attempt in range(max_retries):
             try:
-                base_asset = self.symbol.replace('USDT', '')  # 从SENTISUSDT获取SENTIS
+                base_asset = self.symbol.replace('USDT', '')  # 从交易对获取基础资产
                 account_info = self.client.get_account_info()
                 
                 if account_info and 'balances' in account_info:
@@ -472,6 +525,35 @@ class VolumeStrategy:
                 else:
                     print(f"❌ 获取余额最终失败 (已重试{max_retries}次): {type(e).__name__}")
                     self.log(f"获取余额失败: {e}", 'error')
+                    return 0.0
+        
+        return 0.0
+    
+    def get_usdt_balance(self, max_retries: int = 3) -> float:
+        """获取USDT余额 - 带重试机制"""
+        for attempt in range(max_retries):
+            try:
+                account_info = self.client.get_account_info()
+                
+                if account_info and 'balances' in account_info:
+                    for balance in account_info['balances']:
+                        if balance['asset'] == 'USDT':
+                            return float(balance['free'])
+                return 0.0
+                
+            except Exception as e:
+                error_msg = str(e)
+                if attempt < max_retries - 1:
+                    if "SSL" in error_msg or "EOF" in error_msg or "Connection" in error_msg:
+                        print(f"⚠️ 获取USDT余额网络异常 (第{attempt+1}次尝试): {type(e).__name__}")
+                        time.sleep(1)
+                        continue
+                    else:
+                        self.log(f"获取USDT余额失败: {e}", 'error')
+                        return 0.0
+                else:
+                    print(f"❌ 获取USDT余额最终失败 (已重试{max_retries}次): {type(e).__name__}")
+                    self.log(f"获取USDT余额失败: {e}", 'error')
                     return 0.0
         
         return 0.0
@@ -502,11 +584,96 @@ class VolumeStrategy:
     def check_and_cancel_pending_orders(self) -> bool:
         """容错处理：检查并取消上一轮可能遗留的未成交订单"""
         try:
-            if not self.pending_orders:
-                print("✅ 无待处理订单")
+            print("🔍 检查未成交订单...")
+            
+            # 使用openOrders API获取真实的未成交订单
+            open_orders_result = self.client.get_open_orders(self.symbol)
+            
+            if open_orders_result is None:
+                print("❌ 无法获取未成交订单列表，使用本地记录检查")
+                # 降级到原有的本地记录检查方式
+                return self._fallback_check_pending_orders()
+            
+            # 检查返回的数据格式
+            if isinstance(open_orders_result, list):
+                open_orders = open_orders_result
+            elif isinstance(open_orders_result, dict) and 'orders' in open_orders_result:
+                open_orders = open_orders_result['orders']
+            elif isinstance(open_orders_result, dict) and len(open_orders_result) == 0:
+                open_orders = []
+            else:
+                print(f"❓ 未知的openOrders响应格式: {open_orders_result}")
+                open_orders = []
+            
+            if not open_orders:
+                print("✅ 无未成交订单")
+                # 清空本地记录
+                self.pending_orders.clear()
                 return True
             
-            print(f"🔍 检查 {len(self.pending_orders)} 个可能的未成交订单...")
+            print(f"⚠️ 发现 {len(open_orders)} 个未成交订单")
+            
+            cancelled_count = 0
+            cancelled_buy_quantity = 0.0  # 取消的买单数量
+            cancelled_sell_quantity = 0.0  # 取消的卖单数量
+            
+            for order in open_orders:
+                try:
+                    order_id = order.get('orderId')
+                    side = order.get('side')  # BUY 或 SELL
+                    orig_qty = float(order.get('origQty', 0))
+                    executed_qty = float(order.get('executedQty', 0))
+                    remaining_qty = orig_qty - executed_qty
+                    
+                    print(f"📋 订单详情 ID:{order_id} Side:{side} 原始:{orig_qty} 已成交:{executed_qty} 剩余:{remaining_qty}")
+                    
+                    # 尝试取消订单
+                    cancel_result = self.cancel_order(order_id)
+                    
+                    if cancel_result:
+                        print(f"✅ 订单 {order_id} 取消成功")
+                        cancelled_count += 1
+                        
+                        # 记录取消的数量，用于后续平衡处理
+                        if side == 'BUY':
+                            cancelled_buy_quantity += remaining_qty
+                        elif side == 'SELL':
+                            cancelled_sell_quantity += remaining_qty
+                    else:
+                        print(f"❌ 订单 {order_id} 取消失败")
+                        
+                except Exception as e:
+                    print(f"⚠️ 处理订单时出错: {e}")
+                    continue
+            
+            # 清空本地记录
+            self.pending_orders.clear()
+            
+            if cancelled_count > 0:
+                print(f"✅ 成功取消 {cancelled_count} 个未成交订单")
+                print(f"📊 取消买单数量: {cancelled_buy_quantity:.2f}")
+                print(f"📊 取消卖单数量: {cancelled_sell_quantity:.2f}")
+                
+                # 处理数量不平衡问题
+                self._handle_quantity_imbalance(cancelled_buy_quantity, cancelled_sell_quantity)
+                
+                # 等待取消生效
+                time.sleep(2)
+            
+            return True
+                
+        except Exception as e:
+            print(f"❌ 检查未成交订单时出错: {e}")
+            return True  # 即使出错也返回True，不影响主流程
+    
+    def _fallback_check_pending_orders(self) -> bool:
+        """降级处理：使用本地记录检查未成交订单"""
+        try:
+            if not self.pending_orders:
+                print("✅ 无待处理订单（本地记录）")
+                return True
+            
+            print(f"🔍 检查 {len(self.pending_orders)} 个可能的未成交订单（本地记录）...")
             
             cancelled_count = 0
             for order_id in self.pending_orders[:]:  # 使用切片复制避免在循环中修改列表
@@ -543,15 +710,139 @@ class VolumeStrategy:
                     continue
             
             if cancelled_count > 0:
-                print(f"✅ 成功取消 {cancelled_count} 个未成交订单")
+                print(f"✅ 成功取消 {cancelled_count} 个未成交订单（本地记录）")
                 # 等待取消生效
                 time.sleep(1)
             
             return True
                 
         except Exception as e:
-            print(f"❌ 检查未成交订单时出错: {e}")
-            return True  # 即使出错也返回True，不影响主流程
+            print(f"❌ 检查未成交订单时出错（本地记录）: {e}")
+            return True
+    
+    def _handle_quantity_imbalance(self, cancelled_buy_qty: float, cancelled_sell_qty: float):
+        """处理订单取消导致的数量不平衡"""
+        try:
+            if cancelled_buy_qty == 0 and cancelled_sell_qty == 0:
+                print("✅ 无数量不平衡问题")
+                return
+                
+            print(f"🔄 处理数量不平衡: 买单取消 {cancelled_buy_qty:.2f}, 卖单取消 {cancelled_sell_qty:.2f}")
+            
+            # 如果取消的买单和卖单数量相等，则无需处理
+            if abs(cancelled_buy_qty - cancelled_sell_qty) < 0.01:
+                print("✅ 买卖取消数量基本平衡，无需额外处理")
+                return
+            
+            # 如果取消的买单多于卖单，说明会多出一些USDT余额，少一些现货
+            if cancelled_buy_qty > cancelled_sell_qty:
+                shortage = cancelled_buy_qty - cancelled_sell_qty
+                print(f"📈 取消买单多于卖单，缺少现货 {shortage:.2f} 个")
+                print(f"💡 策略将在后续补货中自动调整")
+                
+            # 如果取消的卖单多于买单，说明会多出一些现货，少一些USDT
+            elif cancelled_sell_qty > cancelled_buy_qty:
+                excess = cancelled_sell_qty - cancelled_buy_qty
+                print(f"📉 取消卖单多于买单，多出现货 {excess:.2f} 个")
+                print(f"💡 策略将在后续清仓中自动调整")
+                
+        except Exception as e:
+            print(f"❌ 处理数量不平衡时出错: {e}")
+    
+    def _update_trade_statistics(self, side: str, quantity: float, price: float, fee: float = 0.0):
+        """更新交易统计数据"""
+        try:
+            volume_usdt = quantity * price
+            
+            if side.upper() == 'BUY':
+                self.buy_volume_usdt += volume_usdt
+                print(f"📊 买单交易量统计: +{volume_usdt:.2f} USDT (累计: {self.buy_volume_usdt:.2f})")
+            elif side.upper() == 'SELL':
+                self.sell_volume_usdt += volume_usdt 
+                print(f"📊 卖单交易量统计: +{volume_usdt:.2f} USDT (累计: {self.sell_volume_usdt:.2f})")
+            
+            # 累计手续费
+            if fee > 0:
+                self.total_fees_usdt += fee
+                print(f"💰 手续费统计: +{fee:.4f} USDT (累计: {self.total_fees_usdt:.4f})")
+            
+            # 显示当前统计
+            total_volume = self.buy_volume_usdt + self.sell_volume_usdt
+            print(f"📈 总交易量: {total_volume:.2f} USDT (买: {self.buy_volume_usdt:.2f} + 卖: {self.sell_volume_usdt:.2f})")
+            
+        except Exception as e:
+            print(f"❌ 更新交易统计时出错: {e}")
+    
+    def _calculate_fee_from_order_result(self, order_result: dict, is_maker: bool = False) -> float:
+        """从订单结果计算手续费(USDT)，使用真实的API费率"""
+        try:
+            # 尝试从订单结果中获取手续费信息
+            if isinstance(order_result, dict):
+                # 检查是否有commission字段
+                commission = order_result.get('commission', 0)
+                commission_asset = order_result.get('commissionAsset', '')
+                
+                if commission > 0:
+                    if commission_asset == 'USDT':
+                        print(f"💰 API返回真实手续费: {commission} USDT")
+                        return float(commission)
+                    else:
+                        # 如果手续费不是USDT，需要转换，暂时跳过转换逻辑
+                        print(f"⚠️ 手续费资产为 {commission_asset}，无法直接转换为USDT，使用费率计算")
+                
+                # 如果没有commission字段或需要转换，使用真实费率计算
+                executed_qty = float(order_result.get('executedQty', 0))
+                avg_price = float(order_result.get('avgPrice', 0))
+                
+                if executed_qty > 0 and avg_price > 0:
+                    trade_value = executed_qty * avg_price
+                    
+                    # 确保已获取费率信息
+                    if not self.fee_rates_loaded:
+                        self.get_commission_rates()
+                    
+                    # 根据是否为maker选择费率
+                    fee_rate = self.maker_fee_rate if is_maker else self.taker_fee_rate
+                    
+                    # 计算手续费
+                    calculated_fee = trade_value * fee_rate
+                    
+                    fee_type = "Maker" if is_maker else "Taker"
+                    print(f"💰 {fee_type}手续费计算: {trade_value:.4f} × {fee_rate:.6f} = {calculated_fee:.4f} USDT")
+                    
+                    return calculated_fee
+            
+            return 0.0
+            
+        except Exception as e:
+            print(f"❌ 计算手续费时出错: {e}")
+            return 0.0
+    
+    def _update_filled_order_statistics(self, order_id: int, side: str):
+        """更新已成交订单的统计数据"""
+        try:
+            # 获取订单详细信息
+            order_info = self.client.get_order(self.symbol, order_id)
+            
+            if order_info and order_info.get('status') == 'FILLED':
+                executed_qty = float(order_info.get('executedQty', 0))
+                avg_price = float(order_info.get('avgPrice', 0))
+                
+                if executed_qty > 0 and avg_price > 0:
+                    # 判断是否为maker（限价单通常是maker，但不一定）
+                    # 如果API返回了maker信息，使用它；否则假设限价单为maker
+                    is_maker = order_info.get('isMaker', True)  # 默认假设限价单是maker
+                    
+                    # 计算手续费
+                    fee = self._calculate_fee_from_order_result(order_info, is_maker=is_maker)
+                    # 更新统计数据
+                    self._update_trade_statistics(side, executed_qty, avg_price, fee)
+                    
+                    maker_type = "Maker" if is_maker else "Taker"
+                    print(f"📊 限价单统计已更新 - {side} {executed_qty:.2f} @ {avg_price:.6f} ({maker_type})")
+                
+        except Exception as e:
+            print(f"❌ 更新订单统计时出错: {e}")
     
     def get_market_depth(self) -> dict:
         """获取市场深度数据"""
@@ -582,7 +873,23 @@ class VolumeStrategy:
             # 使用专用的市价单客户端
             result = self.market_client.place_market_buy_order(self.symbol, quantity_str)
             
-            if result:
+            if result and isinstance(result, dict):
+                # 计算交易统计
+                executed_qty = float(result.get('executedQty', adjusted_quantity))
+                avg_price = float(result.get('avgPrice', 0))
+                
+                # 如果没有平均价格，尝试从当前市价估算
+                if avg_price == 0:
+                    ticker = self.client.get_book_ticker(self.symbol)
+                    if ticker:
+                        avg_price = float(ticker.get('askPrice', 0))
+                
+                if avg_price > 0:
+                    # 计算手续费 (市价单通常是taker)
+                    fee = self._calculate_fee_from_order_result(result, is_maker=False)
+                    # 更新统计数据
+                    self._update_trade_statistics('BUY', executed_qty, avg_price, fee)
+                
                 return result
             else:
                 return "ORDER_VALUE_TOO_SMALL"
@@ -610,8 +917,25 @@ class VolumeStrategy:
             # 使用专用的市价单客户端
             result = self.market_client.place_market_sell_order(self.symbol, quantity_str)
             
-            if result:
+            if result and isinstance(result, dict):
                 self.log(f"✅ 市价卖出成功: ID {result.get('orderId')}")
+                
+                # 计算交易统计
+                executed_qty = float(result.get('executedQty', adjusted_quantity))
+                avg_price = float(result.get('avgPrice', 0))
+                
+                # 如果没有平均价格，尝试从当前市价估算
+                if avg_price == 0:
+                    ticker = self.client.get_book_ticker(self.symbol)
+                    if ticker:
+                        avg_price = float(ticker.get('bidPrice', 0))
+                
+                if avg_price > 0:
+                    # 计算手续费 (市价单通常是taker)
+                    fee = self._calculate_fee_from_order_result(result, is_maker=False)
+                    # 更新统计数据
+                    self._update_trade_statistics('SELL', executed_qty, avg_price, fee)
+                
                 return result
             else:
                 self.log("❌ 市价卖出失败: 无返回结果", 'error')
@@ -1501,6 +1825,11 @@ class VolumeStrategy:
             
             if buy_filled and sell_filled:
                 print("✅ 买卖订单都已成交，无需补单，直接进入下一轮")
+                
+                # 更新限价单统计数据
+                self._update_filled_order_statistics(buy_order_id, 'BUY')
+                self._update_filled_order_statistics(sell_order_id, 'SELL')
+                
                 # 买卖都成交，从跟踪列表中移除这些订单
                 if buy_order_id in self.pending_orders:
                     self.pending_orders.remove(buy_order_id)
@@ -1717,6 +2046,10 @@ class VolumeStrategy:
         self.original_balance = self.get_asset_balance()
         print(f"原始余额: {self.original_balance:.2f}")
         
+        # 记录初始USDT余额
+        self.initial_usdt_balance = self.get_usdt_balance()
+        print(f"初始USDT余额: {self.initial_usdt_balance:.4f}")
+        
         # 检查余额并自动补齐
         if not self.auto_purchase_if_insufficient():
             print("❌ 余额补齐失败，无法执行策略")
@@ -1751,11 +2084,30 @@ class VolumeStrategy:
             # 卖光所有现货持仓
             sellout_success = self.sell_all_holdings()
             
+            # 记录最终USDT余额并计算损耗
+            self.final_usdt_balance = self.get_usdt_balance()
+            self.usdt_balance_diff = self.final_usdt_balance - self.initial_usdt_balance
+            self.net_loss_usdt = self.usdt_balance_diff - self.total_fees_usdt
+            
             print(f"\n=== 策略执行完成 ===")
             print(f"完成轮次: {self.completed_rounds}/{self.rounds}")
             print(f"成功率: {(self.completed_rounds/self.rounds*100):.1f}%")
             print(f"补单次数: {self.supplement_orders}")
             print(f"估算损耗: {self.total_cost_diff:.4f} USDT")
+            
+            # 新增交易量和手续费统计
+            total_volume = self.buy_volume_usdt + self.sell_volume_usdt
+            print(f"\n=== 交易统计 ===")
+            print(f"买单总交易量: {self.buy_volume_usdt:.2f} USDT")
+            print(f"卖单总交易量: {self.sell_volume_usdt:.2f} USDT") 
+            print(f"总交易量: {total_volume:.2f} USDT")
+            print(f"总手续费: {self.total_fees_usdt:.4f} USDT")
+            
+            print(f"\n=== USDT余额分析 ===")
+            print(f"初始USDT余额: {self.initial_usdt_balance:.4f}")
+            print(f"最终USDT余额: {self.final_usdt_balance:.4f}")
+            print(f"USDT余额差值: {self.usdt_balance_diff:+.4f}")
+            print(f"净损耗(差值-手续费): {self.net_loss_usdt:+.4f} USDT")
             
             if self.auto_purchased > 0:
                 print(f"自动购买数量: {self.auto_purchased:.2f}")
@@ -1764,6 +2116,7 @@ class VolumeStrategy:
             original_change = final_balance - self.original_balance
             execution_change = final_balance - self.initial_balance
             
+            print(f"\n=== 现货余额 ===")
             print(f"原始余额: {self.original_balance:.2f}")
             print(f"执行基准余额: {self.initial_balance:.2f}")
             print(f"最终余额: {final_balance:.2f}")

@@ -47,6 +47,15 @@ class Task(db.Model, BaseModel):
     supplement_orders = db.Column(db.Integer, default=0, comment='补单数')
     total_cost_diff = db.Column(Numeric(20, 8), default=0, comment='总损耗')
     
+    # 新增交易量和手续费统计字段
+    buy_volume_usdt = db.Column(Numeric(20, 8), default=0, comment='买单总交易量(USDT)')
+    sell_volume_usdt = db.Column(Numeric(20, 8), default=0, comment='卖单总交易量(USDT)')
+    total_fees_usdt = db.Column(Numeric(20, 8), default=0, comment='总手续费(USDT)')
+    initial_usdt_balance = db.Column(Numeric(20, 8), default=0, comment='初始USDT余额')
+    final_usdt_balance = db.Column(Numeric(20, 8), default=0, comment='最终USDT余额')
+    usdt_balance_diff = db.Column(Numeric(20, 8), default=0, comment='USDT余额差值')
+    net_loss_usdt = db.Column(Numeric(20, 8), default=0, comment='净损耗(USDT)')
+    
     # 时间戳
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -106,7 +115,9 @@ class Task(db.Model, BaseModel):
         db.session.commit()
     
     def update_statistics(self, total_rounds=0, successful_rounds=0, failed_rounds=0, 
-                         supplement_orders=0, total_cost_diff=0):
+                         supplement_orders=0, total_cost_diff=0, buy_volume_usdt=0, 
+                         sell_volume_usdt=0, total_fees_usdt=0, initial_usdt_balance=None, 
+                         final_usdt_balance=None, usdt_balance_diff=0, net_loss_usdt=0):
         """更新执行统计"""
         if total_rounds > 0:
             self.total_rounds += total_rounds
@@ -118,6 +129,23 @@ class Task(db.Model, BaseModel):
             self.supplement_orders += supplement_orders
         if total_cost_diff > 0:
             self.total_cost_diff += PyDecimal(str(total_cost_diff))
+        
+        # 更新新的统计字段
+        if buy_volume_usdt > 0:
+            self.buy_volume_usdt = PyDecimal(str(buy_volume_usdt))
+        if sell_volume_usdt > 0:
+            self.sell_volume_usdt = PyDecimal(str(sell_volume_usdt))
+        if total_fees_usdt > 0:
+            self.total_fees_usdt = PyDecimal(str(total_fees_usdt))
+        if initial_usdt_balance is not None:
+            self.initial_usdt_balance = PyDecimal(str(initial_usdt_balance))
+        if final_usdt_balance is not None:
+            self.final_usdt_balance = PyDecimal(str(final_usdt_balance))
+        if usdt_balance_diff != 0:
+            self.usdt_balance_diff = PyDecimal(str(usdt_balance_diff))
+        if net_loss_usdt != 0:
+            self.net_loss_usdt = PyDecimal(str(net_loss_usdt))
+        
         db.session.commit()
     
     def get_success_rate(self):
