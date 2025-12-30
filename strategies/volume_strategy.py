@@ -49,6 +49,9 @@ class VolumeStrategy:
         self.total_cost_diff = 0.0   # 总损耗（价格差累计）
         self.auto_purchased = 0.0    # 自动购买的数量（需要最终卖出）
         
+        # 订单跟踪 - 用于检查卡单
+        self.pending_orders = []     # 记录当前轮次的订单ID
+        
         print(f"=== 刷量策略初始化 ===")
         print(f"交易对: {symbol}")
         print(f"数量: {quantity}")
@@ -404,15 +407,57 @@ class VolumeStrategy:
         return False
     
     def check_and_cancel_pending_orders(self) -> bool:
-        """容错处理：简化版 - 暂时跳过检查"""
+        """容错处理：检查并取消上一轮可能遗留的未成交订单"""
         try:
-            # 由于SimpleTradingClient没有get_open_orders方法
-            # 暂时简化为直接返回成功，避免影响原有功能
-            print("✅ 容错检查通过 (简化版)")
+            if not self.pending_orders:
+                print("✅ 无待处理订单")
+                return True
+            
+            print(f"🔍 检查 {len(self.pending_orders)} 个可能的未成交订单...")
+            
+            cancelled_count = 0
+            for order_id in self.pending_orders[:]:  # 使用切片复制避免在循环中修改列表
+                try:
+                    # 检查订单状态
+                    status = self.check_order_status(order_id)
+                    
+                    if status == 'NEW' or status == 'PARTIALLY_FILLED':
+                        # 订单未完全成交，尝试取消
+                        print(f"⚠️ 发现未成交订单 ID: {order_id} (状态: {status})")
+                        cancel_result = self.cancel_order(order_id)
+                        
+                        if cancel_result:
+                            print(f"✅ 订单 {order_id} 取消成功")
+                            cancelled_count += 1
+                        else:
+                            print(f"❌ 订单 {order_id} 取消失败")
+                    
+                    elif status in ['FILLED', 'CANCELED', 'REJECTED', 'EXPIRED']:
+                        # 订单已完成，从待处理列表中移除
+                        print(f"ℹ️ 订单 {order_id} 已完成 (状态: {status})")
+                    
+                    else:
+                        # 无法获取状态，保留在列表中
+                        print(f"⚠️ 无法获取订单 {order_id} 状态")
+                        continue
+                    
+                    # 从待处理列表中移除已处理的订单
+                    self.pending_orders.remove(order_id)
+                    
+                except Exception as e:
+                    print(f"⚠️ 处理订单 {order_id} 时出错: {e}")
+                    # 出错的订单暂时保留在列表中
+                    continue
+            
+            if cancelled_count > 0:
+                print(f"✅ 成功取消 {cancelled_count} 个未成交订单")
+                # 等待取消生效
+                time.sleep(1)
+            
             return True
                 
         except Exception as e:
-            print(f"❌ 容错检查异常: {e}")
+            print(f"❌ 检查未成交订单时出错: {e}")
             return True  # 即使出错也返回True，不影响主流程
     
     def get_market_depth(self) -> dict:
@@ -809,14 +854,25 @@ class VolumeStrategy:
                 print(f"  3. 账户USDT余额是否正确: {usdt_balance:.2f}")
                 return False
             
-            # 策略开始时分批买入，最大分10批
-            max_batches = 10
-            batch_usdt_value = min(45.0, total_usdt_needed / max_batches)  # 每批USDT等价，最大分10批
-            batch_quantity = batch_usdt_value / estimated_price
+            # 根据价值确定分批策略
+            if total_usdt_needed <= 60:
+                # 价值 <= 60 USDT：一次性全部买入
+                max_batches = 1
+                batch_quantity = shortage
+                print(f"价值 <= 60 USDT ({total_usdt_needed:.2f})，一次性买入: {shortage:.2f}个")
+            elif total_usdt_needed <= 500:
+                # 价值 60-500 USDT：分5批买入
+                max_batches = 5
+                batch_quantity = shortage / max_batches
+                print(f"价值60-500 USDT ({total_usdt_needed:.2f})，分{max_batches}批买入，每批约: {batch_quantity:.2f}个")
+            else:
+                # 价值 > 500 USDT：分10批买入
+                max_batches = 10
+                batch_quantity = shortage / max_batches
+                print(f"价值 > 500 USDT ({total_usdt_needed:.2f})，分{max_batches}批买入，每批约: {batch_quantity:.2f}个")
+            
             total_purchased = 0.0
             batch_count = 0
-            
-            print(f"开始分批补齐，最大{max_batches}批，每批约{batch_usdt_value:.1f} USDT等价 ({batch_quantity:.2f}个)")
             
             while shortage > 0 and total_purchased < required_quantity and batch_count < max_batches:
                 # 计算本批买入数量
@@ -929,33 +985,84 @@ class VolumeStrategy:
                 print("💡 保留少量现货余额")
                 return True
             
-            # 执行市价卖出所有余额
-            print("执行市价卖光所有现货...")
-            result = self.place_market_sell_order(current_balance)
-            
-            if result == "ORDER_VALUE_TOO_SMALL":
-                print("💡 卖出价值不足，保留余额")
-                return True
-            elif result and isinstance(result, dict):
-                print(f"✅ 卖出成功: ID {result.get('orderId')}")
-                
-                # 等待成交并检查最终余额
-                time.sleep(2)
-                final_balance = self.get_asset_balance()
-                
-                print(f"卖出前余额: {current_balance:.2f}")
-                print(f"卖出后余额: {final_balance:.2f}")
-                print(f"已卖出数量: {(current_balance - final_balance):+.2f}")
-                
-                if final_balance <= 0.1:
-                    print("✅ 现货已全部清仓")
-                    return True
-                else:
-                    print(f"⚠️ 仍有余额: {final_balance:.2f} (可能因价值不足5 USDT)")
-                    return True  # 仍然认为成功，因为已经尽力了
+            # 根据价值确定分批清仓策略
+            if estimated_value <= 60:
+                # 价值 <= 60 USDT：一次性全部卖出
+                max_batches = 1
+                batch_quantity = current_balance
+                print(f"价值 <= 60 USDT ({estimated_value:.2f})，一次性卖出: {current_balance:.2f}个")
+            elif estimated_value <= 500:
+                # 价值 60-500 USDT：分5批卖出
+                max_batches = 5
+                batch_quantity = current_balance / max_batches
+                print(f"价值60-500 USDT ({estimated_value:.2f})，分{max_batches}批卖出，每批约: {batch_quantity:.2f}个")
             else:
-                print("❌ 卖出失败")
-                return False
+                # 价值 > 500 USDT：分10批卖出
+                max_batches = 10
+                batch_quantity = current_balance / max_batches
+                print(f"价值 > 500 USDT ({estimated_value:.2f})，分{max_batches}批卖出，每批约: {batch_quantity:.2f}个")
+            
+            # 执行分批卖出
+            remaining_balance = current_balance
+            batch_count = 0
+            total_sold = 0.0
+            
+            while remaining_balance > 0.1 and batch_count < max_batches:
+                # 计算本批卖出数量
+                current_batch = min(remaining_balance, batch_quantity)
+                
+                # 最后一批卖出所有剩余
+                if batch_count == max_batches - 1:
+                    current_batch = remaining_balance
+                
+                # 检查本批订单价值
+                batch_value = current_batch * estimated_price
+                if batch_value < 5.0 and batch_count < max_batches - 1:
+                    print(f"第{batch_count + 1}批价值不足5 USDT ({batch_value:.2f})，与下批合并")
+                    batch_quantity += current_batch  # 增加下批数量
+                    batch_count += 1
+                    continue
+                
+                print(f"执行第{batch_count + 1}批卖出: {current_batch:.2f}个 (价值约{batch_value:.2f} USDT)")
+                result = self.place_market_sell_order(current_batch)
+                
+                if result == "ORDER_VALUE_TOO_SMALL":
+                    print(f"第{batch_count + 1}批价值不足，跳过")
+                    if batch_count == max_batches - 1:
+                        print("最后一批无法卖出，保留余额")
+                        break
+                elif result and isinstance(result, dict):
+                    print(f"✅ 第{batch_count + 1}批卖出成功: ID {result.get('orderId')}")
+                    total_sold += current_batch
+                    
+                    # 等待成交并检查余额
+                    time.sleep(2)
+                    new_balance = self.get_asset_balance()
+                    remaining_balance = new_balance
+                    
+                    print(f"第{batch_count + 1}批完成，剩余余额: {remaining_balance:.2f}")
+                else:
+                    print(f"❌ 第{batch_count + 1}批卖出失败")
+                    break
+                
+                batch_count += 1
+                
+                # 如果不是最后一批，等待间隔
+                if batch_count < max_batches and remaining_balance > 0.1:
+                    time.sleep(1)
+            
+            # 检查最终结果
+            final_balance = self.get_asset_balance()
+            print(f"清仓前余额: {current_balance:.2f}")
+            print(f"清仓后余额: {final_balance:.2f}")
+            print(f"已卖出数量: {(current_balance - final_balance):+.2f}")
+            
+            if final_balance <= 0.1:
+                print("✅ 现货已全部清仓")
+                return True
+            else:
+                print(f"⚠️ 仍有余额: {final_balance:.2f} (可能因价值不足5 USDT)")
+                return True  # 仍然认为成功，因为已经尽力了
                 
         except Exception as e:
             print(f"❌ 卖出现货异常: {e}")
@@ -1198,6 +1305,12 @@ class VolumeStrategy:
             sell_order_id = sell_order.get('orderId')
             buy_order_id = buy_order.get('orderId')
             
+            # 将有效的订单ID添加到跟踪列表
+            if sell_order_id and sell_order_id != 'unknown_sell':
+                self.pending_orders.append(sell_order_id)
+            if buy_order_id and buy_order_id != 'unknown_buy':
+                self.pending_orders.append(buy_order_id)
+            
             # 处理未知订单ID的情况
             has_unknown_orders = (sell_order_id == 'unknown_sell' or buy_order_id == 'unknown_buy')
             
@@ -1272,6 +1385,11 @@ class VolumeStrategy:
             
             if buy_filled and sell_filled:
                 print("✅ 买卖订单都已成交，无需补单，直接进入下一轮")
+                # 买卖都成交，从跟踪列表中移除这些订单
+                if buy_order_id in self.pending_orders:
+                    self.pending_orders.remove(buy_order_id)
+                if sell_order_id in self.pending_orders:
+                    self.pending_orders.remove(sell_order_id)
                 # 买卖都成交，理论上余额平衡，无需检查
                 round_completed = True
                 self.completed_rounds += 1
@@ -1295,6 +1413,12 @@ class VolumeStrategy:
                     print("✅ 买入订单取消成功")
                 else:
                     print("⚠️ 买入订单取消失败，可能已成交或已取消")
+                
+                # 从跟踪列表中移除订单（无论取消是否成功）
+                if sell_order_id in self.pending_orders:
+                    self.pending_orders.remove(sell_order_id)  # 卖出已成交
+                if buy_order_id in self.pending_orders:
+                    self.pending_orders.remove(buy_order_id)   # 买入已取消或将被取消
                 
                 # 2. 等待一下确保取消生效
                 time.sleep(0.5)
@@ -1329,6 +1453,12 @@ class VolumeStrategy:
                     print("✅ 卖出订单取消成功")
                 else:
                     print("⚠️ 卖出订单取消失败，可能已成交或已取消")
+                
+                # 从跟踪列表中移除订单（无论取消是否成功）
+                if buy_order_id in self.pending_orders:
+                    self.pending_orders.remove(buy_order_id)   # 买入已成交
+                if sell_order_id in self.pending_orders:
+                    self.pending_orders.remove(sell_order_id)  # 卖出已取消或将被取消
                 
                 # 2. 等待一下确保取消生效
                 time.sleep(0.5)
@@ -1430,6 +1560,12 @@ class VolumeStrategy:
                         print("✅ 卖出订单取消成功") 
                     else:
                         print("⚠️ 取消卖出订单失败")
+                    
+                    # 从跟踪列表中移除这些订单（无论取消是否成功）
+                    if buy_order_id in self.pending_orders:
+                        self.pending_orders.remove(buy_order_id)
+                    if sell_order_id in self.pending_orders:
+                        self.pending_orders.remove(sell_order_id)
                     
                     time.sleep(1)  # 等待取消生效
                     print("ℹ️ 所有订单已取消，资金已释放，进入下一轮")
