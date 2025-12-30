@@ -859,9 +859,9 @@ function cleanupOrphanTasks() {
     });
 }
 
-// 定期刷新任务状态
-setInterval(function() {
-    location.reload();
-}, 30000); // 每30秒刷新一次
+// 定期刷新任务状态 - 已禁用，避免关闭正在编辑的任务窗口
+// setInterval(function() {
+//     location.reload();
+// }, 30000); // 每30秒刷新一次
 </script>
 {% endblock %}
