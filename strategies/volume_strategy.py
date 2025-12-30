@@ -1005,7 +1005,7 @@ class VolumeStrategy:
                     sell_future = executor.submit(self.place_sell_order, trade_price)
                     
                     # 50ms延迟后提交买入任务
-                    time.sleep(0.050)  # 50ms延迟
+                    time.sleep(0.020)  # 50ms延迟
                     buy_future = executor.submit(self.place_buy_order, trade_price)
                     
                     # 并行等待结果
