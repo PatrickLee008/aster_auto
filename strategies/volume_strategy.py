@@ -121,20 +121,27 @@ class VolumeStrategy:
                 base_asset = self.symbol.replace('USDT', '')  # 从SENTISUSDT获取SENTIS
                 account_info = self.client.get_account_info()
                 if account_info and 'balances' in account_info:
+                    usdt_balance = 0.0
+                    asset_balance = 0.0
+                    
                     for balance in account_info['balances']:
-                        if balance['asset'] == base_asset:
+                        if balance['asset'] == 'USDT':
+                            usdt_balance = float(balance['free'])
+                        elif balance['asset'] == base_asset:
                             asset_balance = float(balance['free'])
-                            print(f"{base_asset}余额: {asset_balance:.2f}")
-                            
-                            required_quantity = float(self.quantity)
-                            if asset_balance < required_quantity:
-                                print(f"警告: {base_asset}余额不足 ({asset_balance:.2f} < {required_quantity:.2f})")
-                                print("刷量策略可能会在卖出时失败")
-                            else:
-                                print(f"{base_asset}余额充足 ({asset_balance:.2f} >= {required_quantity:.2f})")
-                            break
+                    
+                    print(f"USDT余额: {usdt_balance:.2f}")
+                    print(f"{base_asset}余额: {asset_balance:.2f}")
+                    
+                    required_quantity = float(self.quantity)
+                    if asset_balance < required_quantity:
+                        print(f"警告: {base_asset}余额不足 ({asset_balance:.2f} < {required_quantity:.2f})")
+                        print("刷量策略可能会在卖出时失败")
+                        print(f"需要使用USDT余额({usdt_balance:.2f})进行补齐")
                     else:
-                        print(f"未找到{base_asset}余额信息")
+                        print(f"{base_asset}余额充足 ({asset_balance:.2f} >= {required_quantity:.2f})")
+                else:
+                    print("未能获取账户余额信息")
                 
                 return True
             else:
@@ -417,24 +424,63 @@ class VolumeStrategy:
                 self.log(f"❌ 无效数量: {quantity}", 'error')
                 return None
             
-            # 简化处理：去掉小数点，直接使用整数
+            # 获取USDT余额检查
+            account_info = self.client.get_account_info()
+            usdt_balance = 0.0
+            if account_info and 'balances' in account_info:
+                for balance in account_info['balances']:
+                    if balance['asset'] == 'USDT':
+                        usdt_balance = float(balance['free'])
+                        break
+            
+            self.log(f"当前USDT余额: {usdt_balance:.2f}")
+            
+            # 获取当前市场价格来估算需要的USDT
+            book_data = self.get_order_book()
+            if book_data:
+                estimated_price = book_data['ask_price']  # 买入价格使用卖一价
+                estimated_usdt_needed = quantity * estimated_price
+                self.log(f"估算买入价格: {estimated_price:.5f}")
+                self.log(f"估算需要USDT: {estimated_usdt_needed:.2f}")
+                
+                if usdt_balance < estimated_usdt_needed:
+                    self.log(f"❌ USDT余额不足: {usdt_balance:.2f} < {estimated_usdt_needed:.2f}", 'error')
+                    return None
+            
+            # 检查数量是否超出交易所限制
+            # 先尝试使用整数数量
             import math
-            adjusted_quantity = math.floor(quantity)
-            quantity_str = str(int(adjusted_quantity))
+            original_quantity = quantity
             
-            self.log(f"市价买入原始数量: {quantity:.6f}")
-            self.log(f"市价买入调整为整数: {quantity_str}")
+            # 尝试不同的数量调整策略
+            quantity_strategies = [
+                math.floor(quantity),  # 向下取整
+                math.ceil(quantity),   # 向上取整
+                round(quantity),       # 四舍五入
+                max(1, math.floor(quantity * 0.9)),  # 减少10%
+                max(1, math.floor(quantity * 0.8)),  # 减少20%
+            ]
             
-            # 使用专用的市价单客户端
-            result = self.market_client.place_market_buy_order(self.symbol, quantity_str)
-            
-            if result:
-                self.log(f"✅ 市价买入成功: ID {result.get('orderId')}")
-                return result
-            else:
-                self.log("❌ 市价买入失败: 无返回结果", 'error')
-                # 返回特殊值表示订单价值不足错误
-                return "ORDER_VALUE_TOO_SMALL"
+            for strategy_idx, adjusted_quantity in enumerate(quantity_strategies):
+                if adjusted_quantity <= 0:
+                    continue
+                    
+                quantity_str = str(int(adjusted_quantity))
+                
+                self.log(f"尝试策略 {strategy_idx + 1}: 原始数量 {original_quantity:.6f} -> 调整数量 {quantity_str}")
+                
+                # 使用专用的市价单客户端
+                result = self.market_client.place_market_buy_order(self.symbol, quantity_str)
+                
+                if result:
+                    self.log(f"✅ 市价买入成功 (策略{strategy_idx + 1}): ID {result.get('orderId')}")
+                    return result
+                else:
+                    self.log(f"策略 {strategy_idx + 1} 失败，尝试下一个", 'warning')
+                    
+            # 所有策略都失败了
+            self.log("❌ 所有数量调整策略都失败", 'error')
+            return "ORDER_VALUE_TOO_SMALL"
                 
         except Exception as e:
             self.log(f"❌ 市价买入错误: {type(e).__name__}: {e}", 'error')
@@ -762,44 +808,83 @@ class VolumeStrategy:
             shortage = required_quantity - current_balance
             print(f"⚠️ 余额不足，缺少: {shortage:.2f}")
             
-            # 第一次补齐：按差额补充
-            print(f"执行第一次补齐，数量: {shortage:.2f}")
-            result = self.place_market_buy_order(shortage)
+            # 检查USDT余额能否支持购买
+            account_info = self.client.get_account_info()
+            usdt_balance = 0.0
+            if account_info and 'balances' in account_info:
+                for balance in account_info['balances']:
+                    if balance['asset'] == 'USDT':
+                        usdt_balance = float(balance['free'])
+                        break
             
-            if not result or result == "ORDER_VALUE_TOO_SMALL":
-                print("❌ 第一次补齐失败")
+            print(f"可用USDT余额: {usdt_balance:.2f}")
+            
+            # 获取当前价格估算需要的USDT
+            book_data = self.get_order_book()
+            if not book_data:
+                print("❌ 无法获取市场价格")
                 return False
             
-            # 等待成交并重新检查余额
-            time.sleep(2)
-            new_balance = self.get_asset_balance()
-            print(f"补齐后余额: {new_balance:.2f}")
+            estimated_price = book_data['ask_price']
+            estimated_usdt_needed = shortage * estimated_price
+            print(f"估算买入价格: {estimated_price:.5f}")
+            print(f"估算需要USDT: {estimated_usdt_needed:.2f}")
             
-            # 检查是否还不足
-            if new_balance < required_quantity:
-                remaining_shortage = required_quantity - new_balance
-                print(f"仍不足: {remaining_shortage:.2f}")
+            if usdt_balance < estimated_usdt_needed:
+                print(f"❌ USDT余额不足，无法补齐: {usdt_balance:.2f} < {estimated_usdt_needed:.2f}")
+                print("💡 请先充值USDT或降低交易数量")
+                return False
+            
+            # 分批补齐：避免单次数量过大
+            max_single_purchase = 100.0  # 单次最大购买数量
+            total_purchased = 0.0
+            
+            while shortage > 0:
+                current_purchase = min(shortage, max_single_purchase)
                 
-                # 获取当前价格，按5 USDT价值补充
-                book_data = self.get_order_book()
-                if not book_data:
-                    print("❌ 无法获取市场价格，无法进行第二次补齐")
-                    return False
-                
-                current_price = (book_data['bid_price'] + book_data['ask_price']) / 2
-                min_quantity_for_5usdt = 5.0 / current_price
-                
-                print(f"按5 USDT价值补齐，数量: {min_quantity_for_5usdt:.2f}")
-                result = self.place_market_buy_order(min_quantity_for_5usdt)
+                print(f"执行分批补齐，本次数量: {current_purchase:.2f}")
+                result = self.place_market_buy_order(current_purchase)
                 
                 if not result or result == "ORDER_VALUE_TOO_SMALL":
-                    print("❌ 第二次补齐也失败")
-                    return False
+                    print(f"❌ 分批补齐失败，已补齐: {total_purchased:.2f}")
+                    break
                 
-                print("✅ 第二次补齐完成")
+                total_purchased += current_purchase
+                shortage -= current_purchase
+                
+                # 等待成交
+                time.sleep(1)
+                
+                # 检查实际余额
+                new_balance = self.get_asset_balance()
+                actual_shortage = required_quantity - new_balance
+                
+                print(f"本次补齐后余额: {new_balance:.2f}")
+                print(f"剩余需要补齐: {actual_shortage:.2f}")
+                
+                # 如果实际余额已经足够，提前结束
+                if actual_shortage <= 0:
+                    print("✅ 余额已足够，停止补齐")
+                    break
+                
+                # 更新 shortage 为实际需要的数量
+                shortage = actual_shortage
+                
+                # 防止无限循环
+                if total_purchased >= 1000:
+                    print("⚠️ 已购买大量资产，停止补齐防止异常")
+                    break
             
-            print("✅ 余额补齐完成")
-            return True
+            # 最终检查
+            final_balance = self.get_asset_balance()
+            if final_balance >= required_quantity:
+                print(f"✅ 余额补齐完成: {final_balance:.2f} >= {required_quantity:.2f}")
+                print(f"总计购买: {total_purchased:.2f}")
+                self.auto_purchased = total_purchased  # 记录自动购买数量
+                return True
+            else:
+                print(f"❌ 余额补齐不完整: {final_balance:.2f} < {required_quantity:.2f}")
+                return False
                 
         except Exception as e:
             print(f"❌ 自动补齐失败: {e}")
