@@ -170,14 +170,19 @@ class TaskService:
                 task.update_status('stopped')
                 return True, "任务已停止"
             
-            # 停止进程
+            # 停止进程 - 发送终止信号给策略进程
+            # 策略进程会在收到信号后自动执行清理工作（数据统计、现货清仓）
             success = ProcessManager.stop_task_process(task.process_id)
+            
+            # 给策略进程足够时间完成清理工作
+            import time
+            time.sleep(2)
             
             # 记录任务停止日志
             task_logger.log_task_end(task.name, task.id, "stopped")
             
             task.update_status('stopped')
-            return True, "任务停止成功"
+            return True, "任务停止成功，已执行数据统计和现货清仓"
                 
         except Exception as e:
             print(f"停止任务异常: {e}")

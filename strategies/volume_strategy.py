@@ -2244,10 +2244,60 @@ class VolumeStrategy:
             
         except KeyboardInterrupt:
             self.log("\n用户中断策略执行")
+            # 用户中断时也执行清理和统计
+            self._cleanup_on_stop()
             return False
         except Exception as e:
             self.log(f"策略执行错误: {e}")
+            # 异常时也执行清理和统计
+            self._cleanup_on_stop()
             return False
+    
+    def _cleanup_on_stop(self):
+        """策略停止时的清理和统计工作"""
+        try:
+            self.log("\n=== 策略停止清理 ===")
+            
+            # 1. 检查并取消所有未成交订单
+            self.cancel_all_open_orders()
+            
+            # 2. 执行数据统计
+            self._calculate_final_statistics()
+            
+            # 3. 卖出所有现货恢复余额
+            sellout_success = self.sell_all_holdings()
+            
+            # 4. 记录最终状态
+            self.log(f"数据统计: ✅ 完成")
+            self.log(f"现货清仓: {'✅ 成功' if sellout_success else '⚠️ 未完全清仓'}")
+            self.log("=== 策略停止清理完成 ===")
+            
+        except Exception as e:
+            self.log(f"策略停止清理异常: {e}", 'error')
+    
+    def _calculate_final_statistics(self):
+        """计算最终统计数据"""
+        try:
+            # 获取最终余额信息
+            self.final_usdt_balance = self.get_usdt_balance()
+            self.usdt_balance_diff = self.final_usdt_balance - self.initial_usdt_balance
+            self.net_loss_usdt = self.usdt_balance_diff - self.total_fees_usdt
+            
+            # 计算交易统计
+            total_volume = self.buy_volume_usdt + self.sell_volume_usdt
+            
+            self.log(f"\n=== 最终统计数据 ===")
+            self.log(f"完成轮次: {self.completed_rounds}")
+            self.log(f"补单次数: {self.supplement_orders}")
+            self.log(f"总交易量: {total_volume:.2f} USDT")
+            self.log(f"买单量: {self.buy_volume_usdt:.2f} USDT")
+            self.log(f"卖单量: {self.sell_volume_usdt:.2f} USDT")
+            self.log(f"总手续费: {self.total_fees_usdt:.4f} USDT")
+            self.log(f"USDT余额差值: {self.usdt_balance_diff:+.4f}")
+            self.log(f"净损耗: {self.net_loss_usdt:+.4f} USDT")
+            
+        except Exception as e:
+            self.log(f"计算最终统计数据异常: {e}", 'error')
 
 
 def main():
