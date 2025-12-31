@@ -11,7 +11,7 @@ import time
 # 添加父目录到路径以导入客户端
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from futures_client import AsterFuturesClient
-from config_env import FUTURES_CONFIG, PROXY_CONFIG
+# 注意：不再使用FUTURES_CONFIG回退，策略必须通过钱包配置获取期货账户信息
 
 
 class HiddenFuturesStrategy:
@@ -62,27 +62,20 @@ class HiddenFuturesStrategy:
     def connect(self) -> bool:
         """连接交易所"""
         try:
-            # 使用任务运行器传递的钱包配置
-            if hasattr(self, 'wallet_config') and self.wallet_config:
-                config = self.wallet_config
-                self.client = AsterFuturesClient(
-                    user_address=config['user_address'],
-                    signer_address=config['signer_address'],
-                    private_key=config['private_key'],
-                    proxy_host=config.get('proxy_host', '127.0.0.1'),
-                    proxy_port=config.get('proxy_port', 7890),
-                    use_proxy=config.get('proxy_enabled', True)
-                )
-            else:
-                # 回退到原有的配置方式
-                self.client = AsterFuturesClient(
-                    user_address=FUTURES_CONFIG['user_address'],
-                    signer_address=FUTURES_CONFIG['signer_address'],
-                    private_key=FUTURES_CONFIG['private_key'],
-                    proxy_host=PROXY_CONFIG['host'],
-                    proxy_port=PROXY_CONFIG['port'],
-                    use_proxy=PROXY_CONFIG['enabled']
-                )
+            # 必须使用任务运行器传递的钱包配置
+            if not hasattr(self, 'wallet_config') or not self.wallet_config:
+                self.log("[FAILED] 未提供钱包配置，无法连接", 'error')
+                return False
+                
+            config = self.wallet_config
+            self.client = AsterFuturesClient(
+                user_address=config['user_address'],
+                signer_address=config['signer_address'],
+                private_key=config['private_key'],
+                proxy_host=config.get('proxy_host', '127.0.0.1'),
+                proxy_port=config.get('proxy_port', 7890),
+                use_proxy=config.get('proxy_enabled', True)
+            )
             
             if not self.client.test_connection():
                 self.log("[FAILED] 连接测试失败", 'error')

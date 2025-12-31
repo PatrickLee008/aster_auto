@@ -1,37 +1,39 @@
 """
 环境配置加载器
-支持从.env或.envProd文件加载配置
+使用 python-dotenv 从.env文件加载配置
 """
 
 import os
 from typing import Dict, Optional, Union
+from dotenv import load_dotenv
 
 
-def load_env_file(env_file: str = None) -> None:
+def load_environment():
     """
     加载环境变量文件
-    
-    Args:
-        env_file: 环境文件路径，默认根据ENVIRONMENT环境变量选择
+    优先级：.env.local > .envProd (生产环境) > .env (开发环境)
     """
-    if env_file is None:
-        environment = os.getenv('ENVIRONMENT', 'development')
-        if environment == 'production':
-            env_file = '.envProd'
-        else:
-            env_file = '.env'
+    # 检查环境类型
+    environment = os.getenv('ENVIRONMENT', 'development')
     
-    if not os.path.exists(env_file):
-        print(f"警告: 环境配置文件 {env_file} 不存在")
-        return
+    # 按优先级加载配置文件
+    env_files = []
     
-    with open(env_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#'):
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                    os.environ[key.strip()] = value.strip()
+    if environment == 'production':
+        env_files = ['.env', '.envProd', '.env.local']
+    else:
+        env_files = ['.env', '.env.local']
+    
+    loaded_files = []
+    for env_file in env_files:
+        if os.path.exists(env_file):
+            load_dotenv(env_file, override=True)
+            loaded_files.append(env_file)
+    
+    if loaded_files:
+        print(f"已加载配置文件: {', '.join(loaded_files)}")
+    else:
+        print("警告: 未找到任何环境配置文件")
 
 
 def get_env(key: str, default: Union[str, int, bool, None] = None) -> str:
@@ -53,8 +55,16 @@ def get_env_int(key: str, default: int = 0) -> int:
         return default
 
 
+def get_env_float(key: str, default: float = 0.0) -> float:
+    """获取浮点数类型环境变量"""
+    try:
+        return float(os.getenv(key, str(default)))
+    except ValueError:
+        return default
+
+
 # 加载环境变量
-load_env_file()
+load_environment()
 
 # 数据库配置
 DATABASE_CONFIG = {
@@ -87,20 +97,20 @@ LOGGING_CONFIG = {
 
 # 代理配置
 PROXY_CONFIG = {
-    'enabled': get_env_bool('PROXY_ENABLED', True),
+    'enabled': get_env_bool('PROXY_ENABLED', False),  # 默认禁用代理，生产环境安全
     'host': get_env('PROXY_HOST', '127.0.0.1'),
     'port': get_env_int('PROXY_PORT', 7890),
     'type': get_env('PROXY_TYPE', 'socks5')
 }
 
-# 期货交易配置
+# 期货交易配置 (仅用作策略回退，钱包管理器使用数据库配置)
 FUTURES_CONFIG = {
     'user_address': get_env('FUTURES_USER_ADDRESS', ''),
     'signer_address': get_env('FUTURES_SIGNER_ADDRESS', ''),
     'private_key': get_env('FUTURES_PRIVATE_KEY', '')
 }
 
-# 现货交易配置
+# 现货交易配置 (仅用作策略回退，钱包管理器使用数据库配置)
 SPOT_CONFIG = {
     'api_key': get_env('SPOT_API_KEY', ''),
     'secret_key': get_env('SPOT_SECRET_KEY', '')
@@ -142,40 +152,42 @@ def print_config_status():
     environment = os.getenv('ENVIRONMENT', 'development')
     print(f"当前环境: {environment}")
     
-    # 期货配置检查
+    # 配置文件状态
+    config_files_exist = {
+        '.env': os.path.exists('.env'),
+        '.envProd': os.path.exists('.envProd'),
+        '.env.local': os.path.exists('.env.local')
+    }
+    existing_files = [f for f, exists in config_files_exist.items() if exists]
+    print(f"配置文件: {', '.join(existing_files) if existing_files else '无'}")
+    
+    # 期货配置检查 (仅作回退使用)
     futures_ready = all([
         FUTURES_CONFIG['user_address'],
         FUTURES_CONFIG['signer_address'], 
         FUTURES_CONFIG['private_key']
     ]) and not FUTURES_CONFIG['private_key'].endswith('_HERE')
     
-    print(f"期货交易: {'OK' if futures_ready else 'NOT_CONFIGURED'}")
+    print(f"期货回退配置: {'配置' if futures_ready else '未配置'} (策略回退用)")
     if futures_ready:
         print(f"  用户地址: {FUTURES_CONFIG['user_address']}")
         print(f"  签名地址: {FUTURES_CONFIG['signer_address']}")
         print(f"  私钥: {FUTURES_CONFIG['private_key'][:10]}...{FUTURES_CONFIG['private_key'][-8:]}")
-    else:
-        print(f"  用户地址: {FUTURES_CONFIG['user_address']}")
-        print(f"  签名地址: {FUTURES_CONFIG['signer_address']}")
-        print(f"  私钥: {FUTURES_CONFIG['private_key']}")
     
-    # 现货配置检查
+    # 现货配置检查 (仅作回退使用)
     spot_ready = all([
         SPOT_CONFIG['api_key'],
         SPOT_CONFIG['secret_key']
     ]) and not SPOT_CONFIG['api_key'].endswith('_HERE')
     
-    print(f"现货交易: {'OK' if spot_ready else 'NOT_CONFIGURED'}")
+    print(f"现货回退配置: {'配置' if spot_ready else '未配置'} (策略回退用)")
     if spot_ready:
         print(f"  API密钥: {SPOT_CONFIG['api_key'][:10]}...{SPOT_CONFIG['api_key'][-8:]}")
         print(f"  密钥: {SPOT_CONFIG['secret_key'][:10]}...{SPOT_CONFIG['secret_key'][-8:]}")
-    else:
-        print(f"  API密钥: {SPOT_CONFIG['api_key']}")
-        print(f"  密钥: {SPOT_CONFIG['secret_key']}")
     
     # 代理配置
     proxy_dict = get_proxy_dict()
-    print(f"代理设置: {'ENABLED' if proxy_dict else 'DISABLED'}")
+    print(f"代理设置: {'启用' if proxy_dict else '禁用'}")
     if proxy_dict:
         print(f"  代理地址: {proxy_dict['https']}")
     
@@ -183,8 +195,10 @@ def print_config_status():
     print(f"数据库: {DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']}/{DATABASE_CONFIG['database']}")
     
     # Flask配置
-    debug_status = "ENABLED" if FLASK_CONFIG['debug'] else "DISABLED"
+    debug_status = "开启" if FLASK_CONFIG['debug'] else "关闭"
     print(f"调试模式: {debug_status}")
+    
+    print("\n注意: 主要API配置现在通过钱包管理器存储在数据库中")
 
 
 if __name__ == '__main__':

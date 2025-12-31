@@ -40,7 +40,15 @@ class Strategy(db.Model, BaseModel):
         """检查策略是否兼容指定的钱包类型"""
         if not self.supported_wallet_types:
             return False
-        return wallet_type in self.supported_wallet_types.split(',')
+            
+        supported_types = self.supported_wallet_types.split(',')
+        
+        # 统一钱包兼容所有策略类型
+        if wallet_type == 'unified':
+            return True
+            
+        # 其他类型按原逻辑匹配
+        return wallet_type in supported_types
     
     def __repr__(self):
         return f'<Strategy {self.name}({self.strategy_type})>'

@@ -8,11 +8,15 @@ import math
 import time
 import requests
 from typing import Optional, Dict, Any, List
+import urllib3
 
 from eth_abi import encode
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from web3 import Web3
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class AsterFuturesClient:
@@ -33,8 +37,16 @@ class AsterFuturesClient:
             proxy_port (int): 代理服务器端口
             use_proxy (bool): 是否使用代理
         """
-        self.user = user_address
-        self.signer = signer_address
+        # 确保地址格式正确（checksum格式）
+        from web3 import Web3
+        try:
+            self.user = Web3.to_checksum_address(user_address)
+            self.signer = Web3.to_checksum_address(signer_address)
+        except Exception as e:
+            print(f"⚠️  地址格式转换失败: {e}")
+            self.user = user_address
+            self.signer = signer_address
+            
         self.private_key = private_key
         self.host = 'https://fapi.asterdex.com'
         
@@ -64,6 +76,12 @@ class AsterFuturesClient:
             dict: 包含签名的完整参数
         """
         try:
+            # print(f"🔐 [期货签名调试] 开始签名参数...")
+            # print(f"📋 原始参数: {params}")
+            # print(f"👤 用户地址: {self.user}")
+            # print(f"✍️  签名地址: {self.signer}")
+            # print(f"🔑 私钥长度: {len(self.private_key) if self.private_key else 'None'}")
+            
             # 检查私钥是否为None
             if self.private_key is None:
                 raise ValueError("私钥为None，请检查配置")
@@ -79,8 +97,12 @@ class AsterFuturesClient:
             clean_params['recvWindow'] = 50000
             clean_params['timestamp'] = int(round(time.time() * 1000))
             
+            # print(f"⏰ Nonce: {nonce}")
+            # print(f"📅 Timestamp: {clean_params['timestamp']}")
+            
             # 生成签名消息
             msg_hash = self._generate_message_hash(clean_params, nonce)
+            # print(f"🔒 消息哈希: {msg_hash}")
             
             if msg_hash is None:
                 raise ValueError("生成的消息哈希为None")
@@ -95,14 +117,17 @@ class AsterFuturesClient:
             clean_params['signer'] = self.signer
             clean_params['signature'] = '0x' + signed_message.signature.hex()
             
+            # print(f"✅ 签名完成: {clean_params['signature'][:20]}...")
+            # print(f"📤 最终参数: {clean_params}")
+            
             return clean_params
             
         except Exception as e:
-            print(f"签名失败: {e}")
-            print(f"私钥: {self.private_key}")
-            print(f"用户地址: {self.user}")
-            print(f"签名地址: {self.signer}")
-            print(f"原始参数: {params}")
+            print(f"❌ 签名失败: {e}")
+            print(f"🔑 私钥: {self.private_key}")
+            print(f"👤 用户地址: {self.user}")
+            print(f"✍️  签名地址: {self.signer}")
+            print(f"📋 原始参数: {params}")
             raise
     
     def _generate_message_hash(self, params: Dict[str, Any], nonce: int) -> str:
@@ -188,48 +213,75 @@ class AsterFuturesClient:
                 'Accept': 'application/json'
             }
             
+            # 禁用SSL验证以避免代理SSL问题
+            verify_ssl = False
+            
             if method == 'POST':
                 headers['Content-Type'] = 'application/x-www-form-urlencoded'
                 response = requests.post(url, data=params, headers=headers, 
-                                       proxies=self.proxies, timeout=30)
+                                       proxies=self.proxies, timeout=30, verify=verify_ssl)
             elif method == 'GET':
                 response = requests.get(url, params=params, headers=headers,
-                                      proxies=self.proxies, timeout=30)
+                                      proxies=self.proxies, timeout=30, verify=verify_ssl)
             elif method == 'DELETE':
                 response = requests.delete(url, data=params, headers=headers,
-                                         proxies=self.proxies, timeout=30)
+                                         proxies=self.proxies, timeout=30, verify=verify_ssl)
             else:
                 raise ValueError(f"不支持的HTTP方法: {method}")
             
+            # print(f"📡 响应状态码: {response.status_code}")
+            
             if response.status_code == 200:
-                return response.json()
+                result = response.json()
+                # print(f"✅ 成功响应: {result}")
+                return result
             else:
-                print(f"请求失败: HTTP {response.status_code}")
+                print(f"❌ 请求失败: HTTP {response.status_code}")
                 try:
                     error_data = response.json()
-                    print(f"错误详情: {error_data}")
+                    print(f"🚨 错误详情 (JSON): {error_data}")
                 except:
-                    print(f"错误内容: {response.text}")
+                    print(f"🚨 错误详情 (TEXT): {response.text}")
                 return None
             
         except requests.exceptions.RequestException as e:
-            print(f"请求失败: {e}")
+            print(f"❌ 请求异常: {e}")
             return None
     
     def test_connection(self) -> bool:
         """
-        测试与服务器的连接
+        测试与服务器的连接，带重试机制
         
         Returns:
             bool: 连接是否成功
         """
-        result = self._make_request('GET', '/fapi/v3/ping')
-        if result is not None:
-            print("期货服务器连接正常")
-            return True
-        else:
-            print("期货服务器连接失败")
-            return False
+        max_retries = 3
+        timeout_list = [15, 20, 30]  # 逐步增加超时时间
+        
+        for attempt in range(max_retries):
+            try:
+                timeout = timeout_list[attempt]
+                print(f"期货连接测试 (尝试 {attempt + 1}/{max_retries}, 超时: {timeout}s)")
+                
+                response = requests.get(
+                    self.host + "/fapi/v3/ping",
+                    proxies=self.proxies,
+                    timeout=timeout,
+                    verify=False
+                )
+                if response.status_code == 200:
+                    print("期货服务器连接正常")
+                    return True
+            except Exception as e:
+                print(f"期货服务器连接失败 (尝试 {attempt + 1}): {e}")
+                if attempt < max_retries - 1:
+                    print("等待2秒后重试...")
+                    import time
+                    time.sleep(2)
+        
+        print("期货服务器连接失败 - 所有重试都失败")
+        return False
+    
     
     # 价格查询相关方法
     
@@ -513,7 +565,11 @@ class AsterFuturesClient:
         Returns:
             dict: 账户信息，包含资产、持仓等详细信息
         """
-        result = self._make_request('GET', '/fapi/v3/account', {}, need_signature=True)
+        params = {
+            'timestamp': int(round(time.time() * 1000)),
+            'recvWindow': 50000
+        }
+        result = self._make_request('GET', '/fapi/v3/account', params, need_signature=True)
         return result
     
     def set_margin_type(self, symbol: str, margin_type: str) -> Optional[Dict[str, Any]]:

@@ -16,8 +16,10 @@ class SimpleTradingClient:
     
     def __init__(self, api_key=None, secret_key=None):
         """初始化客户端"""
-        self.api_key = api_key or SPOT_CONFIG['api_key']
-        self.secret_key = secret_key or SPOT_CONFIG['secret_key']
+        if not api_key or not secret_key:
+            raise ValueError("API密钥和密钥不能为空，必须从钱包配置中提供")
+        self.api_key = api_key
+        self.secret_key = secret_key
         self.host = 'https://sapi.asterdex.com'
         
         # 设置代理

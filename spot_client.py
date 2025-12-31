@@ -10,7 +10,10 @@ import hmac
 import hashlib
 from urllib.parse import urlencode
 from typing import Optional, Dict, Any, List
-from config_env import SPOT_CONFIG
+import urllib3
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class AsterSpotClient:
@@ -55,7 +58,8 @@ class AsterSpotClient:
             response = requests.get(
                 self.host + "/api/v1/time",
                 proxies=self.proxies,
-                timeout=10
+                timeout=10,
+                verify=False
             )
             if response.status_code == 200:
                 return response.json()['serverTime']
@@ -115,9 +119,9 @@ class AsterSpotClient:
         
         query_string = "&".join(ordered_params)
         
-        # 使用HMAC SHA256签名 - 修复版本
+        # 使用HMAC SHA256签名 - 使用实例的密钥而不是配置文件
         signature = hmac.new(
-            SPOT_CONFIG['secret_key'].encode('utf-8'),
+            self.secret_key.encode('utf-8'),
             query_string.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
@@ -159,16 +163,19 @@ class AsterSpotClient:
                 'X-MBX-APIKEY': self.api_key
             }
             
+            # 禁用SSL验证以避免代理SSL问题
+            verify_ssl = False
+            
             if method == 'POST':
                 headers['Content-Type'] = 'application/x-www-form-urlencoded'
                 response = requests.post(url, data=params, headers=headers, 
-                                       proxies=self.proxies, timeout=30)
+                                       proxies=self.proxies, timeout=30, verify=verify_ssl)
             elif method == 'GET':
                 response = requests.get(url, params=params, headers=headers,
-                                      proxies=self.proxies, timeout=30)
+                                      proxies=self.proxies, timeout=30, verify=verify_ssl)
             elif method == 'DELETE':
                 response = requests.delete(url, data=params, headers=headers,
-                                         proxies=self.proxies, timeout=30)
+                                         proxies=self.proxies, timeout=30, verify=verify_ssl)
             else:
                 raise ValueError(f"不支持的HTTP方法: {method}")
             
@@ -193,13 +200,22 @@ class AsterSpotClient:
         Returns:
             bool: 连接是否成功
         """
-        result = self._make_request('GET', '/api/v1/ping')
-        if result is not None:
-            print("现货服务器连接正常")
-            return True
-        else:
-            print("现货服务器连接失败")
-            return False
+        try:
+            # 直接测试ping，避免通过_make_request的复杂逻辑
+            response = requests.get(
+                self.host + "/api/v1/ping",
+                proxies=self.proxies,
+                timeout=10,
+                verify=False
+            )
+            if response.status_code == 200:
+                print("现货服务器连接正常")
+                return True
+        except Exception as e:
+            print(f"现货服务器连接失败: {e}")
+        
+        print("现货服务器连接失败")
+        return False
     
     # 价格查询相关方法
     
@@ -302,9 +318,9 @@ class AsterSpotClient:
             
             query_string = "&".join(ordered_params)
             
-            # 生成签名 - 直接使用成功的方法
+            # 生成签名 - 使用实例的密钥而不是配置文件
             signature = hmac.new(
-                SPOT_CONFIG['secret_key'].encode('utf-8'),
+                self.secret_key.encode('utf-8'),
                 query_string.encode('utf-8'),
                 hashlib.sha256
             ).hexdigest()
@@ -521,10 +537,46 @@ class AsterSpotClient:
         Returns:
             dict: 账户信息
         """
-        result = self._make_request('GET', '/api/v1/account', need_signature=True)
-        if result:
-            print("账户信息获取成功")
-        return result
+        try:
+            # 获取服务器时间
+            server_time = self._get_server_time()
+            if not server_time:
+                server_time = int(time.time() * 1000)
+            
+            params = {
+                'timestamp': server_time,
+                'recvWindow': 60000
+            }
+            
+            # 简化签名方式，参照SimpleTradingClient的成功实现
+            query_string = f"timestamp={server_time}&recvWindow=60000"
+            signature = hmac.new(
+                self.secret_key.encode('utf-8'),
+                query_string.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+            
+            params['signature'] = signature
+            
+            # 直接发送请求
+            response = requests.get(
+                f"{self.host}/api/v1/account",
+                params=params,
+                headers={'X-MBX-APIKEY': self.api_key},
+                proxies=self.proxies,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                print("账户信息获取成功")
+                return response.json()
+            else:
+                print(f"获取账户信息失败: {response.status_code} {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"获取账户信息异常: {e}")
+            return None
     
     def get_trade_list(self, symbol: str, order_id: Optional[int] = None,
                       start_time: Optional[int] = None, end_time: Optional[int] = None,

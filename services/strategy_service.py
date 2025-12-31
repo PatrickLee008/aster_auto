@@ -191,7 +191,7 @@ class StrategyService:
                     'name': '现货刷量策略',
                     'description': '现货刷量交易策略，通过买卖相同数量和价格的现货来刷交易量',
                     'strategy_type': 'volume',
-                    'supported_wallet_types': 'spot',
+                    'supported_wallet_types': 'spot,unified',
                     'module_path': 'strategies.volume_strategy',
                     'class_name': 'VolumeStrategy',
                     'default_parameters': {
@@ -205,7 +205,7 @@ class StrategyService:
                     'name': '合约HIDDEN自成交策略',
                     'description': '使用HIDDEN隐藏订单实现合约自成交，零风险策略',
                     'strategy_type': 'hidden_futures',
-                    'supported_wallet_types': 'futures',
+                    'supported_wallet_types': 'futures,unified',
                     'module_path': 'strategies.hidden_futures_strategy',
                     'class_name': 'HiddenFuturesStrategy',
                     'default_parameters': {

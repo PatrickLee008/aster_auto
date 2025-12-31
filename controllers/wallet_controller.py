@@ -18,23 +18,51 @@ def add_wallet():
     try:
         data = request.form.to_dict()
         
-        success, message, wallet = WalletService.create_wallet(
-            user_id=current_user.id,
-            name=data.get('name'),
-            wallet_type=data.get('wallet_type'),
-            description=data.get('description'),
-            api_key=data.get('api_key'),
-            secret_key=data.get('secret_key'),
-            user_address=data.get('user_address'),
-            signer_address=data.get('signer_address'),
-            private_key=data.get('private_key')
-        )
+        # 检查钱包类型和配置
+        wallet_type = data.get('wallet_type')
+        has_spot_config = data.get('spot_api_key') and data.get('spot_secret_key')
+        has_futures_config = data.get('user_address') and data.get('signer_address') and data.get('private_key')
         
-        return jsonify({
-            'success': success,
-            'message': message,
-            'wallet_id': wallet.id if wallet else None
-        })
+        if wallet_type == 'unified' or (has_spot_config and has_futures_config):
+            # 使用新的统一钱包创建方法
+            # 移除重复的参数，避免冲突
+            clean_data = {k: v for k, v in data.items() if k not in ['name', 'description', 'is_active']}
+            
+            success, message, wallets = WalletService.create_unified_wallet(
+                user_id=current_user.id,
+                name=data.get('name', '钱包配置'),
+                description=data.get('description', ''),
+                is_active=data.get('is_active', 'true').lower() in ['true', 'on', '1'],
+                **clean_data
+            )
+            
+            wallet_ids = [w.id for w in wallets] if wallets else []
+            
+            return jsonify({
+                'success': success,
+                'message': message,
+                'wallet_ids': wallet_ids,
+                'wallet_count': len(wallet_ids)
+            })
+        else:
+            # 兼容旧的单一钱包类型创建方式
+            success, message, wallet = WalletService.create_wallet(
+                user_id=current_user.id,
+                name=data.get('name'),
+                wallet_type=data.get('wallet_type'),
+                description=data.get('description'),
+                api_key=data.get('api_key'),
+                secret_key=data.get('secret_key'),
+                user_address=data.get('user_address'),
+                signer_address=data.get('signer_address'),
+                private_key=data.get('private_key')
+            )
+            
+            return jsonify({
+                'success': success,
+                'message': message,
+                'wallet_id': wallet.id if wallet else None
+            })
         
     except Exception as e:
         return jsonify({
@@ -48,17 +76,19 @@ def add_wallet():
 def test_wallet(wallet_id):
     """测试钱包连接API"""
     try:
-        success, message = WalletService.test_wallet_connection(wallet_id, current_user.id)
+        success, message, balance_info = WalletService.test_wallet_connection(wallet_id, current_user.id)
         
         return jsonify({
             'success': success,
-            'message': message
+            'message': message,
+            'balance_info': balance_info
         })
         
     except Exception as e:
         return jsonify({
             'success': False,
-            'message': f"连接测试异常: {str(e)}"
+            'message': f"连接测试异常: {str(e)}",
+            'balance_info': None
         }), 500
 
 

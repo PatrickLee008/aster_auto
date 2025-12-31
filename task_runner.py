@@ -126,8 +126,29 @@ class TaskRunner:
             # 获取全局代理配置
             proxy_config = self.get_global_proxy_config()
             
-            # 根据钱包类型准备配置
-            if self.wallet.wallet_type == 'spot':
+            # 根据钱包类型和策略类型准备配置
+            if self.wallet.wallet_type == 'unified':
+                # 统一钱包根据策略类型使用相应的API配置
+                if self.strategy.strategy_type in ['volume', 'spot']:
+                    # 现货策略使用现货API
+                    config = {
+                        'api_key': credentials['api_key'],
+                        'secret_key': credentials['secret_key'],
+                        **proxy_config
+                    }
+                    self.logger.info(f"统一钱包现货配置准备完成，使用钱包: {self.wallet.name}")
+                elif self.strategy.strategy_type in ['hidden_futures', 'futures']:
+                    # 期货策略使用期货API
+                    config = {
+                        'user_address': self.wallet.user_address,
+                        'signer_address': self.wallet.signer_address,
+                        'private_key': credentials['private_key'],
+                        **proxy_config
+                    }
+                    self.logger.info(f"统一钱包期货配置准备完成，使用钱包: {self.wallet.name}")
+                else:
+                    raise Exception(f"策略类型 {self.strategy.strategy_type} 与统一钱包不兼容")
+            elif self.wallet.wallet_type == 'spot':
                 config = {
                     'api_key': credentials['api_key'],
                     'secret_key': credentials['secret_key'],

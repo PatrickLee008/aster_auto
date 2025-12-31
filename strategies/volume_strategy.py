@@ -13,7 +13,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from simple_trading_client import SimpleTradingClient
 from market_trading_client import MarketTradingClient
-from config_env import SPOT_CONFIG
+# 注意：不再使用SPOT_CONFIG回退，策略必须通过钱包配置获取API密钥
 
 
 class VolumeStrategy:
@@ -228,15 +228,13 @@ class VolumeStrategy:
                     )
                     self.log(f"使用任务钱包配置连接交易所，API密钥: {api_key[:8]}...{api_key[-4:]}")
                 else:
-                    # API密钥或secret为空，回退到默认配置
-                    self.client = SimpleTradingClient()
-                    self.market_client = MarketTradingClient()
-                    self.log("钱包API密钥为空，使用默认配置连接交易所", 'warning')
+                    # API密钥或secret为空，无法连接
+                    self.log("钱包API密钥为空，无法连接交易所", 'error')
+                    return False
             else:
-                # 回退到原有的配置方式
-                self.client = SimpleTradingClient()
-                self.market_client = MarketTradingClient()
-                self.log("未找到钱包配置，使用默认配置连接交易所（回退模式）", 'warning')
+                # 未找到钱包配置，无法连接
+                self.log("未找到钱包配置，无法连接交易所", 'error')
+                return False
             
             if self.client.test_connection():
                 self.log("交易所连接成功")

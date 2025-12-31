@@ -16,8 +16,10 @@ class MarketTradingClient:
     
     def __init__(self, api_key=None, secret_key=None):
         """初始化客户端"""
-        self.api_key = api_key or SPOT_CONFIG['api_key']
-        self.secret_key = secret_key or SPOT_CONFIG['secret_key']
+        if not api_key or not secret_key:
+            raise ValueError("API密钥和密钥不能为空，必须从钱包配置中提供")
+        self.api_key = api_key
+        self.secret_key = secret_key
         self.host = 'https://sapi.asterdex.com'
         
         # 代理配置始终使用全局设置
@@ -31,10 +33,7 @@ class MarketTradingClient:
             self.proxies = None
         
         print(f"市价单交易客户端初始化完成")
-        if api_key and api_key != SPOT_CONFIG['api_key']:
-            print("使用自定义API配置")
-        else:
-            print("使用默认配置文件")
+        print("使用钱包提供的API配置")
         if self.proxies:
             print(f"使用全局代理配置: {self.proxies['https']}")
         else:

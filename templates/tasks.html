@@ -211,7 +211,7 @@
                                     <option value="">选择钱包</option>
                                     {% for wallet in wallets %}
                                     <option value="{{ wallet.id }}" data-type="{{ wallet.wallet_type }}">
-                                        {{ wallet.name }} ({{ '现货' if wallet.wallet_type == 'spot' else '合约' }})
+                                        {{ wallet.name }}
                                     </option>
                                     {% endfor %}
                                 </select>
@@ -328,7 +328,7 @@
                                     <option value="">选择钱包</option>
                                     {% for wallet in wallets %}
                                     <option value="{{ wallet.id }}" data-type="{{ wallet.wallet_type }}">
-                                        {{ wallet.name }} ({{ '现货' if wallet.wallet_type == 'spot' else '合约' }})
+                                        {{ wallet.name }}
                                     </option>
                                     {% endfor %}
                                 </select>
@@ -458,7 +458,11 @@ $(document).ready(function() {
         
         $(strategySelector + ' option').each(function() {
             const supportedTypes = $(this).data('supported-types');
-            if (supportedTypes && supportedTypes.includes(walletType)) {
+            
+            // 统一钱包兼容所有策略
+            if (walletType === 'unified') {
+                $(this).show();
+            } else if (supportedTypes && supportedTypes.includes(walletType)) {
                 $(this).show();
             } else if ($(this).val() === '') {
                 $(this).show(); // 保留空选项

@@ -23,11 +23,8 @@ def get_proxy_config():
         }
         
     except ImportError:
-        # 如果没有配置文件，使用默认配置（本地开发）
-        return {
-            'http': 'socks5://127.0.0.1:7890',
-            'https': 'socks5://127.0.0.1:7890'
-        }
+        # 如果没有配置文件，默认禁用代理（生产环境安全）
+        return None
     except Exception as e:
         print(f"获取代理配置失败: {e}")
         return None
@@ -44,7 +41,7 @@ def is_proxy_enabled():
         from config_env import PROXY_CONFIG
         return PROXY_CONFIG.get('enabled', False)
     except ImportError:
-        return True  # 默认启用代理（本地开发）
+        return False  # 默认禁用代理，生产环境安全
     except Exception:
         return False
 
@@ -66,7 +63,7 @@ def get_proxy_info():
         }
     except ImportError:
         return {
-            'enabled': True,
+            'enabled': False,  # 默认禁用代理，生产环境安全
             'host': '127.0.0.1',
             'port': 7890,
             'type': 'socks5'
