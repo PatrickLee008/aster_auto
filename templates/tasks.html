@@ -81,7 +81,7 @@
                                     </div>
                                 </td>
                                 <td>
-                                    <span class="badge bg-{{ 
+                                    <span id="status-{{ task.id }}" class="badge bg-{{ 
                                         'success' if task.status == 'running' else
                                         'secondary' if task.status == 'stopped' else  
                                         'danger' if task.status == 'error' else
@@ -100,20 +100,18 @@
                                     {% if task.process_id %}
                                     <br><small class="text-muted">PID: {{ task.process_id }}</small>
                                     {% endif %}
+                                    <!-- 进度条 -->
+                                    <div id="progress-{{ task.id }}" class="progress mt-1" style="height: 4px;">
+                                        <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                    </div>
                                 </td>
                                 <td>
-                                    <div class="small">
-                                        <strong>完成: {{ task.successful_rounds }}/{{ task.rounds }}</strong>
-                                        {% if task.supplement_orders > 0 %}
-                                        <br>补单: <span class="text-warning">{{ task.supplement_orders }}</span>
-                                        {% endif %}
-                                        
-                                        <br><strong>交易量统计:</strong>
-                                        <br>买单: <span class="text-success">{{ task.buy_volume_usdt or 0 }} USDT</span>
-                                        <br>卖单: <span class="text-info">{{ task.sell_volume_usdt or 0 }} USDT</span>
-                                        <br>总量: <span class="text-primary">{{ (task.buy_volume_usdt or 0) + (task.sell_volume_usdt or 0) }} USDT</span>
-                                        
-                                        <br>手续费: <span class="text-warning">{{ task.total_fees_usdt or 0 }} USDT</span>
+                                    <div id="statistics-{{ task.id }}" class="small">
+                                        <strong>完成: <span class="completed-rounds">{{ task.successful_rounds }}</span>/<span class="total-rounds">{{ task.rounds }}</span></strong>
+                                        <br>补单: <span class="supplement-orders text-warning">{{ task.supplement_orders or 0 }}</span>
+                                        <br>买量: <span class="buy-volume text-success">0.00</span>
+                                        <br>卖量: <span class="sell-volume text-info">0.00</span>
+                                        <br>手续费: <span class="total-fees text-warning">0.00</span>
                                         
                                         {% if task.usdt_balance_diff %}
                                         <br>USDT差值: <span class="{{ 'text-success' if task.usdt_balance_diff > 0 else 'text-danger' }}">{{ task.usdt_balance_diff }} USDT</span>
@@ -130,6 +128,8 @@
                                         {% if task.successful_rounds > 0 and task.rounds > 0 %}
                                         <br>完成率: {{ "%.1f"|format((task.successful_rounds / task.rounds) * 100) }}%
                                         {% endif %}
+                                        
+                                        <br><small class="last-update text-muted">最后更新: -</small>
                                     </div>
                                 </td>
                                 <td>
@@ -896,9 +896,140 @@ function cleanupOrphanTasks() {
     });
 }
 
-// 定期刷新任务状态 - 已禁用，避免关闭正在编辑的任务窗口
-// setInterval(function() {
-//     location.reload();
-// }, 30000); // 每30秒刷新一次
+// 实时更新任务状态和进度
+let updateInterval;
+
+function startRealTimeUpdates() {
+    updateInterval = setInterval(function() {
+        updateTaskStatuses();
+    }, 3000); // 每3秒更新一次
+}
+
+function stopRealTimeUpdates() {
+    if (updateInterval) {
+        clearInterval(updateInterval);
+    }
+}
+
+function updateTaskStatuses() {
+    $.ajax({
+        url: '/api/tasks/status',
+        method: 'GET',
+        success: function(response) {
+            if (response.success && response.tasks) {
+                response.tasks.forEach(function(task) {
+                    updateTaskRow(task);
+                });
+            }
+        },
+        error: function() {
+            console.log('更新任务状态失败，将在下个周期重试');
+        }
+    });
+}
+
+function updateTaskRow(task) {
+    const taskRow = $('#task-' + task.task_id);
+    if (taskRow.length === 0) return;
+
+    // 更新状态徽章
+    const statusBadge = $('#status-' + task.task_id);
+    const statusClass = getStatusClass(task.status);
+    const statusIcon = getStatusIcon(task.status);
+    
+    statusBadge.attr('class', 'badge bg-' + statusClass);
+    statusBadge.html(statusIcon + ' ' + getStatusText(task.status));
+
+    // 更新进度条
+    const progressBar = $('#progress-' + task.task_id + ' .progress-bar');
+    progressBar.css('width', task.percentage + '%');
+    progressBar.attr('aria-valuenow', task.percentage);
+    
+    // 设置进度条颜色
+    progressBar.attr('class', 'progress-bar bg-' + getProgressBarColor(task.percentage, task.status));
+
+    // 更新统计数据
+    const statistics = $('#statistics-' + task.task_id);
+    statistics.find('.completed-rounds').text(task.completed_rounds);
+    statistics.find('.total-rounds').text(task.total_rounds);
+    statistics.find('.supplement-orders').text(task.supplement_orders);
+    statistics.find('.buy-volume').text(task.buy_volume.toFixed(2));
+    statistics.find('.sell-volume').text(task.sell_volume.toFixed(2));
+    statistics.find('.total-fees').text(task.total_fees.toFixed(4));
+    
+    // 更新最后更新时间
+    if (task.last_update) {
+        const updateTime = new Date(task.last_update);
+        statistics.find('.last-update').text('最后更新: ' + updateTime.toLocaleTimeString());
+    }
+}
+
+function getStatusClass(status) {
+    switch (status) {
+        case 'running': return 'success';
+        case 'completed': return 'success';
+        case 'failed': return 'danger';
+        case 'stopped': return 'secondary';
+        case 'error': return 'danger';
+        case 'paused': return 'warning';
+        case 'pending': return 'secondary';
+        default: return 'light';
+    }
+}
+
+function getStatusIcon(status) {
+    switch (status) {
+        case 'running': return '<i class="fas fa-play"></i>';
+        case 'completed': return '<i class="fas fa-check-circle"></i>';
+        case 'failed': return '<i class="fas fa-exclamation-triangle"></i>';
+        case 'stopped': return '<i class="fas fa-stop"></i>';
+        case 'error': return '<i class="fas fa-exclamation-triangle"></i>';
+        case 'paused': return '<i class="fas fa-pause"></i>';
+        case 'pending': return '<i class="fas fa-clock"></i>';
+        default: return '<i class="fas fa-question"></i>';
+    }
+}
+
+function getStatusText(status) {
+    switch (status) {
+        case 'running': return '运行中';
+        case 'completed': return '已完成';
+        case 'failed': return '异常终止';
+        case 'stopped': return '已停止';
+        case 'error': return '错误';
+        case 'paused': return '暂停';
+        case 'pending': return '未开始';
+        default: return '未知';
+    }
+}
+
+function getProgressBarColor(percentage, status) {
+    switch (status) {
+        case 'completed': return 'success';
+        case 'failed': return 'danger';
+        case 'error': return 'danger';
+        case 'paused': return 'warning';
+        case 'pending': return 'secondary';
+        case 'running':
+            if (percentage < 30) return 'info';
+            if (percentage < 70) return 'warning';
+            return 'success';
+        default: return 'secondary';
+    }
+}
+
+// 页面加载时启动实时更新
+$(document).ready(function() {
+    startRealTimeUpdates();
+});
+
+// 页面隐藏时停止更新，显示时恢复更新（节省资源）
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        stopRealTimeUpdates();
+    } else {
+        startRealTimeUpdates();
+    }
+});
 </script>
 {% endblock %}

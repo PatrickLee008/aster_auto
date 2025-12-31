@@ -8,8 +8,9 @@ from flask_login import login_required, current_user
 import os
 import glob
 
-from services import AuthService, StrategyService, WalletService
+from services import AuthService, StrategyService, WalletService, TaskService
 from models.base import db
+from utils.task_progress_parser import task_progress_parser
 
 main_bp = Blueprint('main', __name__)
 
@@ -291,4 +292,99 @@ def get_logs_info():
         return jsonify({
             'success': False, 
             'message': f'获取日志信息失败: {str(e)}'
+        }), 500
+
+
+@main_bp.route('/api/tasks/status', methods=['GET'])
+@login_required
+def get_tasks_status():
+    """获取所有任务的实时状态和进度"""
+    try:
+        # 获取当前用户的任务（管理员可以看到所有用户的任务）
+        if current_user.is_admin:
+            tasks = TaskService.get_all_tasks()
+        else:
+            tasks = TaskService.get_user_tasks(current_user.id)
+        
+        # 只处理运行中或最近的任务
+        task_statuses = []
+        for task in tasks:
+            if task.status in ['running', 'paused']:
+                # 解析任务进度
+                progress = task_progress_parser.parse_task_progress(task.name, task.id)
+                task_statuses.append(progress)
+            else:
+                # 对于非运行状态的任务，返回基本信息
+                # 首先尝试解析日志来获取准确状态
+                progress = task_progress_parser.parse_task_progress(task.name, task.id)
+                
+                # 如果日志解析失败，使用数据库状态
+                if progress['status'] in ['unknown', 'pending']:
+                    if task.status == 'stopped':
+                        # 检查是否有执行记录
+                        if hasattr(task, 'successful_rounds') and hasattr(task, 'rounds'):
+                            if task.successful_rounds > 0:
+                                # 有执行记录，判断是完成还是异常终止
+                                if task.successful_rounds >= task.rounds and task.rounds > 0:
+                                    progress['status'] = 'completed'
+                                    progress['percentage'] = 100
+                                else:
+                                    progress['status'] = 'failed'
+                            else:
+                                # 没有执行记录，说明从未启动过
+                                progress['status'] = 'pending'
+                                progress['percentage'] = 0
+                        else:
+                            # 无法获取轮次信息，保持stopped状态
+                            progress['status'] = 'stopped'
+                    else:
+                        progress['status'] = task.status
+                
+                task_statuses.append(progress)
+        
+        return jsonify({
+            'success': True,
+            'tasks': task_statuses,
+            'timestamp': os.path.getmtime(__file__)  # 用于客户端缓存控制
+        })
+        
+    except Exception as e:
+        print(f"获取任务状态失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'获取任务状态失败: {str(e)}'
+        }), 500
+
+
+@main_bp.route('/api/tasks/<int:task_id>/progress', methods=['GET'])
+@login_required  
+def get_task_progress(task_id):
+    """获取单个任务的详细进度"""
+    try:
+        # 检查任务权限
+        task = TaskService.get_task_by_id(task_id, current_user.id, current_user.is_admin)
+        if not task:
+            return jsonify({'success': False, 'message': '任务不存在或无权限访问'}), 404
+        
+        # 解析任务进度
+        progress = task_progress_parser.parse_task_progress(task.name, task.id)
+        
+        # 添加任务基本信息
+        progress.update({
+            'wallet_name': task.wallet.name if task.wallet else '未知',
+            'strategy_name': task.strategy.name if task.strategy else '未知',
+            'created_at': task.created_at.isoformat() if task.created_at else None,
+            'updated_at': task.updated_at.isoformat() if task.updated_at else None
+        })
+        
+        return jsonify({
+            'success': True,
+            'progress': progress
+        })
+        
+    except Exception as e:
+        print(f"获取任务进度失败: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'获取任务进度失败: {str(e)}'
         }), 500

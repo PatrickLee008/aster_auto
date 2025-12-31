@@ -38,7 +38,7 @@ class VolumeStrategy:
         self.logger = None  # 日志记录器
         
         # 风险控制参数 - 优化时间参数提高成交率
-        self.buy_timeout = 1.0  # 买入检查时间(改为1秒，给订单更多成交时间)
+        self.order_check_timeout = 2.0  # 订单成交检查时间(改为2秒，给买卖订单更多成交时间)
         self.max_price_deviation = 0.01  # 最大价格偏差(1%)
         
         # 统计数据
@@ -1886,8 +1886,8 @@ class VolumeStrategy:
             # 强制日志：开始状态检查
             self.log(f"=== 第{round_num}轮: 开始检查订单状态 ===", 'info')
             
-            # 6. 等待300毫秒后检查订单成交状态（仅当有有效订单ID时）
-            time.sleep(self.buy_timeout)  # 等待300毫秒
+            # 6. 等待2秒后检查订单成交状态（仅当有有效订单ID时）
+            time.sleep(self.order_check_timeout)  # 等待2秒
             
             # 检查买入和卖出订单状态
             buy_status = self.check_order_status(buy_order_id)
