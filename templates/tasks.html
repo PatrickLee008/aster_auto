@@ -6,9 +6,11 @@
 <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createTaskModal">
     <i class="fas fa-plus"></i> 创建任务
 </button>
+{% if current_user.is_admin %}
 <button type="button" class="btn btn-warning" onclick="cleanupOrphanTasks()">
     <i class="fas fa-broom"></i> 清理孤儿进程
 </button>
+{% endif %}
 {% endblock %}
 
 {% block content %}
