@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block page_title %}任务管理{% endblock %}
+{% block page_title %}任务管理{% if is_admin %}（所有用户）{% endif %}{% endblock %}
 
 {% block page_actions %}
 <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createTaskModal">
@@ -25,6 +25,9 @@
                         <thead>
                             <tr>
                                 <th>任务名称</th>
+                                {% if is_admin %}
+                                <th>用户</th>
+                                {% endif %}
                                 <th>钱包</th>
                                 <th>策略</th>
                                 <th>状态</th>
@@ -44,6 +47,17 @@
                                         {% endif %}
                                     </div>
                                 </td>
+                                {% if is_admin %}
+                                <td>
+                                    <div>
+                                        <i class="fas fa-user me-1"></i>
+                                        <strong>{{ task.user.username }}</strong>
+                                        {% if task.user.nickname %}
+                                        <br><small class="text-muted">{{ task.user.nickname }}</small>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                {% endif %}
                                 <td>
                                     <span class="badge bg-light text-dark">
                                         <i class="fas fa-wallet"></i> {{ task.wallet.name }}

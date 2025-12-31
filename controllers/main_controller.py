@@ -9,6 +9,7 @@ import os
 import glob
 
 from services import AuthService, StrategyService, WalletService
+from models import db
 
 main_bp = Blueprint('main', __name__)
 
@@ -62,17 +63,24 @@ def tasks():
     try:
         from services import TaskService
         
-        user_tasks = TaskService.get_user_tasks(current_user.id)
+        # 管理员可以查看所有用户的任务，普通用户只能查看自己的任务
+        if current_user.is_admin:
+            user_tasks = TaskService.get_all_tasks()  # 管理员看到所有任务
+            user_wallets = WalletService.get_all_wallets()  # 管理员看到所有钱包
+        else:
+            user_tasks = TaskService.get_user_tasks(current_user.id)
+            user_wallets = WalletService.get_user_wallets(current_user.id)
+        
         strategies = StrategyService.get_active_strategies()
-        user_wallets = WalletService.get_user_wallets(current_user.id)
         
         return render_template('tasks.html', 
                              tasks=user_tasks, 
                              strategies=strategies, 
-                             wallets=user_wallets)
+                             wallets=user_wallets,
+                             is_admin=current_user.is_admin)
     except Exception as e:
         print(f"任务页面加载失败: {e}")
-        return render_template('tasks.html', tasks=[], strategies=[], wallets=[])
+        return render_template('tasks.html', tasks=[], strategies=[], wallets=[], is_admin=current_user.is_admin)
 
 
 @main_bp.route('/settings')

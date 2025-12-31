@@ -64,7 +64,7 @@ def create_task():
 def start_task(task_id):
     """启动任务API"""
     try:
-        success, message = TaskService.start_task(task_id, current_user.id)
+        success, message = TaskService.start_task(task_id, current_user.id, current_user.is_admin)
         
         return jsonify({
             'success': success,
@@ -83,7 +83,7 @@ def start_task(task_id):
 def stop_task(task_id):
     """停止任务API"""
     try:
-        success, message = TaskService.stop_task(task_id, current_user.id)
+        success, message = TaskService.stop_task(task_id, current_user.id, current_user.is_admin)
         
         return jsonify({
             'success': success,

@@ -639,7 +639,15 @@ function editWallet(walletId) {
 
 // 删除钱包
 function deleteWallet(walletId) {
-    if (confirm('确定要删除这个钱包吗？此操作不可恢复！')) {
+    const confirmMsg = '⚠️ 删除钱包确认\n\n' +
+                      '确定要删除这个钱包吗？\n\n' +
+                      '此操作将：\n' +
+                      '• 永久删除钱包配置和API信息\n' +
+                      '• 同时删除所有使用此钱包的任务\n' +
+                      '• 此操作不可恢复！\n\n' +
+                      '如有正在运行的任务，请先停止后再删除。';
+    
+    if (confirm(confirmMsg)) {
         $.ajax({
             url: `/api/wallets/${walletId}`,
             method: 'DELETE',

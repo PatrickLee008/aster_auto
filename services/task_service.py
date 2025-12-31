@@ -100,7 +100,7 @@ class TaskService:
             return False, f"创建任务失败: {str(e)}", None
     
     @staticmethod
-    def start_task(task_id: int, user_id: int) -> Tuple[bool, str]:
+    def start_task(task_id: int, user_id: int, is_admin: bool = False) -> Tuple[bool, str]:
         """
         启动任务
         
@@ -108,7 +108,12 @@ class TaskService:
             (success, message)
         """
         try:
-            task = Task.query.filter_by(id=task_id, user_id=user_id).first()
+            # 管理员可以操作所有用户的任务，普通用户只能操作自己的任务
+            if is_admin:
+                task = Task.query.filter_by(id=task_id).first()
+            else:
+                task = Task.query.filter_by(id=task_id, user_id=user_id).first()
+            
             if not task:
                 return False, "任务不存在"
             
@@ -130,7 +135,7 @@ class TaskService:
             return False, f"启动任务失败: {str(e)}"
     
     @staticmethod
-    def stop_task(task_id: int, user_id: int) -> Tuple[bool, str]:
+    def stop_task(task_id: int, user_id: int, is_admin: bool = False) -> Tuple[bool, str]:
         """
         停止任务
         
@@ -138,7 +143,12 @@ class TaskService:
             (success, message)
         """
         try:
-            task = Task.query.filter_by(id=task_id, user_id=user_id).first()
+            # 管理员可以操作所有用户的任务，普通用户只能操作自己的任务
+            if is_admin:
+                task = Task.query.filter_by(id=task_id).first()
+            else:
+                task = Task.query.filter_by(id=task_id, user_id=user_id).first()
+                
             if not task:
                 return False, "任务不存在"
             
@@ -369,6 +379,15 @@ class TaskService:
                            .order_by(Task.updated_at.desc()).all()
         except Exception as e:
             print(f"获取任务列表失败: {e}")
+            return []
+    
+    @staticmethod
+    def get_all_tasks() -> List[Task]:
+        """获取所有任务列表（管理员用）"""
+        try:
+            return Task.query.order_by(Task.updated_at.desc()).all()
+        except Exception as e:
+            print(f"获取所有任务失败: {e}")
             return []
     
     @staticmethod

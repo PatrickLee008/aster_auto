@@ -183,25 +183,41 @@ class WalletService:
     @staticmethod
     def delete_wallet(wallet_id: int, user_id: int) -> Tuple[bool, str]:
         """
-        删除钱包
+        删除钱包及其关联的任务
         
         Returns:
             (success, message)
         """
         try:
+            from models.task import Task
+            
             wallet = Wallet.query.filter_by(id=wallet_id, user_id=user_id).first()
             if not wallet:
                 return False, "钱包不存在"
             
             # 检查是否有关联的运行中任务
-            running_tasks = Task.query.filter_by(wallet_id=wallet_id, status='running').count()
+            running_tasks = Task.query.filter_by(wallet_id=wallet_id).filter(
+                Task.status.in_(['running', 'pending'])
+            ).count()
             if running_tasks > 0:
-                return False, "请先停止关联的运行中任务"
+                return False, "请先停止关联的运行中或等待中的任务"
             
+            # 获取关联任务数量用于反馈
+            related_tasks_count = Task.query.filter_by(wallet_id=wallet_id).count()
+            
+            # 删除所有关联任务
+            Task.query.filter_by(wallet_id=wallet_id).delete()
+            
+            # 删除钱包
             db.session.delete(wallet)
             db.session.commit()
             
-            return True, "钱包删除成功"
+            # 构造反馈消息
+            message = "钱包删除成功"
+            if related_tasks_count > 0:
+                message += f"，同时删除了 {related_tasks_count} 个关联任务"
+            
+            return True, message
             
         except Exception as e:
             db.session.rollback()
@@ -481,6 +497,18 @@ class WalletService:
             return query.order_by(Wallet.created_at.desc()).all()
         except Exception as e:
             print(f"获取钱包列表失败: {e}")
+            return []
+    
+    @staticmethod
+    def get_all_wallets(include_inactive: bool = False) -> List[Wallet]:
+        """获取所有钱包列表（管理员用）"""
+        try:
+            query = Wallet.query
+            if not include_inactive:
+                query = query.filter_by(is_active=True)
+            return query.order_by(Wallet.created_at.desc()).all()
+        except Exception as e:
+            print(f"获取所有钱包失败: {e}")
             return []
     
     @staticmethod
