@@ -20,8 +20,8 @@ class Wallet(db.Model, BaseModel):
     secret_key = db.Column(db.Text)  # 加密存储
     
     # 期货API配置  
-    user_address = db.Column(db.String(42))
-    signer_address = db.Column(db.String(42))
+    user_address = db.Column(db.String(100))  # 增加长度以支持各种地址格式
+    signer_address = db.Column(db.String(100))  # 增加长度以支持各种地址格式
     private_key = db.Column(db.Text)  # 加密存储
     
     # 状态和元数据
