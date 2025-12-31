@@ -9,7 +9,7 @@ import os
 import glob
 
 from services import AuthService, StrategyService, WalletService
-from models import db
+from models.base import db
 
 main_bp = Blueprint('main', __name__)
 
