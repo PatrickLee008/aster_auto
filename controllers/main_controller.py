@@ -161,6 +161,74 @@ def clear_logs():
         }), 500
 
 
+@main_bp.route('/api/clear-all-tasks', methods=['POST'])
+@login_required
+def clear_all_tasks():
+    """清空所有任务（仅管理员）"""
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'message': '权限不足'}), 403
+    
+    try:
+        from models.task import Task
+        
+        # 获取所有任务数量
+        task_count = Task.query.count()
+        
+        # 删除所有任务
+        Task.query.delete()
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'已成功清空 {task_count} 个任务'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'清空任务失败: {str(e)}'}), 500
+
+
+@main_bp.route('/api/clear-all-wallets', methods=['POST'])
+@login_required
+def clear_all_wallets():
+    """清空所有钱包和关联任务（仅管理员）"""
+    if not current_user.is_admin:
+        return jsonify({'success': False, 'message': '权限不足'}), 403
+    
+    try:
+        from models.wallet import Wallet
+        from models.task import Task
+        
+        # 先检查是否有运行中的任务
+        running_tasks = Task.query.filter(Task.status.in_(['running', 'pending'])).count()
+        if running_tasks > 0:
+            return jsonify({
+                'success': False, 
+                'message': f'无法清空钱包，有 {running_tasks} 个任务正在运行或等待中，请先停止所有任务'
+            }), 400
+        
+        # 获取统计信息
+        wallet_count = Wallet.query.count()
+        task_count = Task.query.count()
+        
+        # 删除所有任务（包括关联的钱包任务）
+        Task.query.delete()
+        
+        # 删除所有钱包
+        Wallet.query.delete()
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'已成功清空 {wallet_count} 个钱包和 {task_count} 个关联任务'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'清空钱包和任务失败: {str(e)}'}), 500
+
+
 @main_bp.route('/api/get-logs-info', methods=['GET'])
 @login_required
 def get_logs_info():

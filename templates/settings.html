@@ -196,6 +196,51 @@
         </div>
     </div>
 
+    <!-- 数据管理 -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card settings-card">
+                <div class="settings-header p-3">
+                    <h5 class="mb-0"><i class="fas fa-database me-2"></i>数据管理</h5>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>警告：</strong>以下操作将永久删除数据，操作前请确认！
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-tasks fa-2x text-primary me-3"></i>
+                                <div>
+                                    <h6 class="mb-1">清空所有任务</h6>
+                                    <p class="text-muted small mb-0">删除系统中所有的交易任务</p>
+                                </div>
+                            </div>
+                            <button class="btn btn-outline-danger w-100" onclick="confirmClearAllTasks()">
+                                <i class="fas fa-trash-alt me-2"></i>清空所有任务
+                            </button>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-wallet fa-2x text-warning me-3"></i>
+                                <div>
+                                    <h6 class="mb-1">清空所有钱包</h6>
+                                    <p class="text-muted small mb-0">删除所有钱包和关联任务</p>
+                                </div>
+                            </div>
+                            <button class="btn btn-outline-danger w-100" onclick="confirmClearAllWallets()">
+                                <i class="fas fa-trash-alt me-2"></i>清空所有钱包
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- 系统操作 -->
     <div class="row">
         <div class="col-12">
@@ -459,6 +504,95 @@ async function cleanupTasks() {
 
 async function exportData() {
     showSuccess('数据导出功能开发中...');
+}
+
+// 确认清空所有任务
+async function confirmClearAllTasks() {
+    const confirmMsg = '⚠️ 危险操作确认\n\n' +
+                      '确定要清空系统中所有的交易任务吗？\n\n' +
+                      '此操作将：\n' +
+                      '• 永久删除所有用户的任务\n' +
+                      '• 停止所有正在运行的任务\n' +
+                      '• 清除所有任务历史记录\n\n' +
+                      '此操作无法撤销！';
+    
+    if (confirm(confirmMsg)) {
+        await clearAllTasks();
+    }
+}
+
+// 清空所有任务
+async function clearAllTasks() {
+    try {
+        const response = await fetch('/api/clear-all-tasks', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess(result.message);
+            // 刷新页面统计信息
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            showError(result.message);
+        }
+        
+    } catch (error) {
+        showError('清空任务时发生错误: ' + error.message);
+    }
+}
+
+// 确认清空所有钱包
+async function confirmClearAllWallets() {
+    const confirmMsg = '⚠️ 极度危险操作确认\n\n' +
+                      '确定要清空系统中所有的钱包吗？\n\n' +
+                      '此操作将：\n' +
+                      '• 永久删除所有用户的钱包配置\n' +
+                      '• 删除所有钱包关联的任务\n' +
+                      '• 清除所有API配置信息\n' +
+                      '• 用户将无法进行任何交易操作\n\n' +
+                      '此操作无法撤销！请三思而后行！';
+    
+    if (confirm(confirmMsg)) {
+        // 二次确认
+        const secondConfirm = '最后确认：您真的要删除所有钱包配置吗？\n\n输入 "确认删除" 来继续操作：';
+        const userInput = prompt(secondConfirm);
+        
+        if (userInput === '确认删除') {
+            await clearAllWallets();
+        } else {
+            alert('操作已取消');
+        }
+    }
+}
+
+// 清空所有钱包
+async function clearAllWallets() {
+    try {
+        const response = await fetch('/api/clear-all-wallets', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showSuccess(result.message);
+            // 刷新页面统计信息
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            showError(result.message);
+        }
+        
+    } catch (error) {
+        showError('清空钱包时发生错误: ' + error.message);
+    }
 }
 
 // 计算运行时间
