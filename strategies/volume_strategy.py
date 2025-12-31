@@ -1745,7 +1745,7 @@ class VolumeStrategy:
             import threading
             import time
             
-            self.log("执行顺序: 卖出 -> 买入 (250毫秒延迟)")
+            self.log("执行顺序: 卖出 -> 买入 ")
             start_time = time.time()
             
             # 强制日志：即将下单
