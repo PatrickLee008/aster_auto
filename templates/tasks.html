@@ -955,10 +955,12 @@ function updateTaskProgressDisplay(task) {
             statsHtml += `<br>USDT余额: <span class="text-info">${task.usdt_balance.toFixed(2)} USDT</span>`;
         }
         
-        // 添加净损益信息
+        // 添加磨损信息
         if (task.net_profit !== 0) {
-            const profitClass = task.net_profit > 0 ? 'text-success' : 'text-danger';
-            statsHtml += `<br>净损益: <span class="${profitClass}">${task.net_profit > 0 ? '+' : ''}${task.net_profit.toFixed(4)} USDT</span>`;
+            const isLoss = task.net_profit < 0;
+            const profitClass = isLoss ? 'text-danger' : 'text-success';
+            const displayValue = isLoss ? Math.abs(task.net_profit) : task.net_profit;
+            statsHtml += `<br>磨损: <span class="${profitClass}">${isLoss ? '' : '+'}${displayValue.toFixed(4)} USDT</span>`;
         }
         
         
