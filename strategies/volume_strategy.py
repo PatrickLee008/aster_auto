@@ -45,7 +45,7 @@ class VolumeStrategy:
         # API优化参数 - 方案3智能优化
         self.batch_query_enabled = True  # 启用批量查询
         self.cache_enabled = True  # 启用缓存
-        self.orderbook_cache_time = 3.0  # 订单簿缓存时间(秒)
+        self.orderbook_cache_time = 0.0  # 禁用订单簿缓存，实时获取最新价格
         self.balance_cache_time = 0.0  # 余额缓存时间(秒) - 禁用！余额必须实时获取
         self.smart_skip_enabled = True  # 启用智能跳过
         
@@ -412,7 +412,9 @@ class VolumeStrategy:
                     'bid_price': bid_price,
                     'ask_price': ask_price
                 }
-            return None
+            else:
+                self.log("❌ 无法获取book ticker数据，检查网络连接或API状态", "error")
+                return None
             
         except Exception as e:
             self.log(f"获取订单薄失败: {e}", 'error')
@@ -877,17 +879,9 @@ class VolumeStrategy:
                 self.log("✅ 错误率正常，重新启用批量查询")
                 self.batch_query_enabled = True
         
-        # 根据成功率调整缓存时间
-        if self.consecutive_success >= 20:
-            # 连续成功多次，可以增加缓存时间
-            self.orderbook_cache_time = min(5.0, self.orderbook_cache_time * 1.2)
-            # 余额缓存始终保持为0，不允许动态调整
-            self.balance_cache_time = 0.0
-        elif self.consecutive_success < 3:
-            # 成功率低，减少缓存时间
-            self.orderbook_cache_time = max(1.0, self.orderbook_cache_time * 0.8)
-            # 余额缓存始终保持为0，不允许动态调整
-            self.balance_cache_time = 0.0
+        # 订单簿缓存已禁用，不再动态调整
+        # 余额缓存始终保持为0，确保实时准确性
+        self.balance_cache_time = 0.0
 
     def check_and_cancel_pending_orders(self) -> bool:
         """容错处理：检查并取消上一轮可能遗留的未成交订单"""
@@ -2033,8 +2027,21 @@ class VolumeStrategy:
                 self.log(f"💡 调整交易数量为安全数量: {safe_quantity:.2f}")
                 actual_quantity = safe_quantity
             else:
-                self.log(f"❌ 即使调整后数量仍不足，跳过本轮", "error")
-                return False
+                self.log(f"❌ 即使调整后数量仍不足，触发自动补货", "warning")
+                # 余额不足就触发补货
+                if self.auto_purchase_if_insufficient():
+                    self.log(f"✅ 补货成功，重新检查余额")
+                    # 重新获取余额
+                    available_balance = self.smart_balance_check()
+                    if available_balance >= required_quantity + safety_margin:
+                        actual_quantity = available_balance - safety_margin
+                        self.log(f"✅ 补货后余额充足，使用数量: {actual_quantity:.2f}")
+                    else:
+                        self.log(f"❌ 补货后余额仍不足，跳过本轮", "error")
+                        return False
+                else:
+                    self.log(f"❌ 补货失败，跳过本轮", "error")
+                    return False
         else:
             # 即使余额充足，也使用安全数量避免精度问题
             actual_quantity = available_balance - safety_margin

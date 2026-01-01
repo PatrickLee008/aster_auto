@@ -205,7 +205,20 @@ class TaskRunner:
             self.logger.error(f"更新任务状态失败: {e}")
     
     def get_global_proxy_config(self):
-        """获取全局代理配置"""
+        """获取任务专用代理配置 - 优先使用Smartproxy"""
+        try:
+            # 优先尝试获取任务专用的Smartproxy代理
+            from utils.smartproxy_manager import get_task_proxy_config
+            smartproxy_config = get_task_proxy_config(self.task_id, 'residential')
+            
+            if smartproxy_config.get('proxy_enabled', False):
+                self.logger.info(f"任务 {self.task_id} 使用Smartproxy代理: {smartproxy_config.get('country', 'US')} IP")
+                return smartproxy_config
+            
+        except Exception as e:
+            self.logger.warning(f"获取Smartproxy代理失败: {e}，尝试全局代理配置")
+        
+        # 回退到全局代理配置
         try:
             from utils.proxy_config import is_proxy_enabled, get_proxy_info
             
@@ -213,6 +226,7 @@ class TaskRunner:
             
             if proxy_enabled:
                 proxy_info = get_proxy_info()
+                self.logger.info(f"任务 {self.task_id} 使用全局代理配置")
                 return {
                     'proxy_enabled': True,
                     'proxy_host': proxy_info.get('host', '127.0.0.1'),
@@ -231,6 +245,138 @@ class TaskRunner:
                 'proxy_host': None,
                 'proxy_port': None
             }
+    
+    def log_proxy_status(self, config):
+        """输出详细的代理配置状态"""
+        self.logger.info("🌐 代理配置状态检查")
+        self.logger.info("-" * 40)
+        
+        if not config.get('proxy_enabled', False):
+            self.logger.info("❌ 代理未启用 - 使用直连")
+            return
+        
+        # 基础代理信息
+        proxy_host = config.get('proxy_host', 'unknown')
+        proxy_port = config.get('proxy_port', 'unknown')
+        
+        # 检查是否是Smartproxy
+        if 'smartproxy' in str(proxy_host).lower() or 'decodo' in str(proxy_host).lower():
+            self.logger.info("✅ Smartproxy代理已启用")
+            
+            # 尝试获取更详细的Smartproxy信息
+            try:
+                from utils.smartproxy_manager import get_proxy_manager
+                manager = get_proxy_manager()
+                
+                if manager.enabled:
+                    self.logger.info(f"📍 代理主机: {proxy_host}")
+                    self.logger.info(f"🔌 代理端口: {proxy_port}")
+                    
+                    # 显示任务特定信息
+                    country = config.get('country', 'US')
+                    proxy_type = config.get('proxy_type', 'residential')
+                    session_duration = getattr(manager, 'session_duration', '60')
+                    
+                    self.logger.info(f"🌍 IP地区: {country}")
+                    self.logger.info(f"📡 代理类型: {proxy_type}")
+                    self.logger.info(f"⏰ 粘性会话: {session_duration}分钟")
+                    
+                    # 显示当前IP（如果已测试）
+                    current_ip = config.get('current_ip')
+                    if current_ip:
+                        self.logger.info(f"🔍 当前代理IP: {current_ip}")
+                    
+                    # 显示任务绑定信息
+                    self.logger.info(f"🎯 任务ID绑定: #{self.task_id}")
+                    
+                else:
+                    self.logger.warning("⚠️ Smartproxy管理器未启用")
+                    
+            except Exception as e:
+                self.logger.warning(f"⚠️ 获取Smartproxy详情失败: {e}")
+                self.logger.info(f"📍 代理: {proxy_host}:{proxy_port}")
+        else:
+            # 全局代理配置
+            self.logger.info("🔧 全局代理配置")
+            self.logger.info(f"📍 代理: {proxy_host}:{proxy_port}")
+            
+            # 代理认证信息
+            proxy_auth = config.get('proxy_auth')
+            if proxy_auth:
+                # 只显示用户名部分，密码用*号隐藏
+                if ':' in proxy_auth:
+                    username = proxy_auth.split(':')[0]
+                    self.logger.info(f"👤 认证用户: {username}")
+                else:
+                    self.logger.info("🔐 包含认证信息")
+        
+        # 测试代理连接
+        self.test_proxy_connection(config)
+        
+        self.logger.info("-" * 40)
+    
+    def test_proxy_connection(self, config):
+        """测试代理连接状态"""
+        if not config.get('proxy_enabled', False):
+            return
+            
+        try:
+            import requests
+            import time
+            
+            # 构建代理URL
+            proxy_host = config.get('proxy_host')
+            proxy_port = config.get('proxy_port')
+            proxy_auth = config.get('proxy_auth')
+            
+            if proxy_auth:
+                proxy_url = f"http://{proxy_auth}@{proxy_host}:{proxy_port}"
+            else:
+                proxy_url = f"http://{proxy_host}:{proxy_port}"
+            
+            proxies = {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+            
+            self.logger.info("🔄 测试代理连接...")
+            start_time = time.time()
+            
+            # 测试连接
+            response = requests.get(
+                'https://ip.decodo.com/json',
+                proxies=proxies,
+                timeout=8
+            )
+            
+            end_time = time.time()
+            latency = int((end_time - start_time) * 1000)
+            
+            if response.status_code == 200:
+                data = response.json()
+                ip = data.get('ip', 'unknown')
+                country = data.get('country', 'unknown')
+                city = data.get('city', 'unknown')
+                
+                self.logger.info(f"✅ 代理连接成功 (延迟: {latency}ms)")
+                self.logger.info(f"🌐 实际IP: {ip}")
+                self.logger.info(f"📍 位置: {city}, {country}")
+                
+                # 更新配置中的当前IP信息
+                config['current_ip'] = ip
+                config['proxy_country'] = country
+                config['proxy_city'] = city
+                config['proxy_latency'] = latency
+                
+            else:
+                self.logger.error(f"❌ 代理连接失败: HTTP {response.status_code}")
+                
+        except requests.exceptions.Timeout:
+            self.logger.error("❌ 代理连接超时")
+        except requests.exceptions.ProxyError:
+            self.logger.error("❌ 代理连接错误")
+        except Exception as e:
+            self.logger.error(f"❌ 代理测试异常: {e}")
     
     def update_task_stats(self, total_rounds=0, successful_rounds=0, failed_rounds=0, 
                           supplement_orders=0, total_cost_diff=0, buy_volume_usdt=0,
@@ -293,6 +439,9 @@ class TaskRunner:
             
             # 2. 准备策略配置
             config, parameters = self.prepare_strategy_config()
+            
+            # 2.5. 显示代理配置状态
+            self.log_proxy_status(config)
             
             # 3. 加载策略类
             strategy_class = self.load_strategy_class()

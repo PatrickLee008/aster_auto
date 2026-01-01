@@ -115,9 +115,12 @@ class SimpleTradingClient:
             )
             if response.status_code == 200:
                 return response.json()
-        except:
-            pass
-        return None
+            else:
+                print(f"获取book ticker失败: HTTP {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            print(f"获取book ticker错误: {e}")
+            return None
     
     def get_depth(self, symbol: str, limit: int = 5) -> Optional[Dict[str, Any]]:
         """获取深度数据"""
@@ -130,9 +133,12 @@ class SimpleTradingClient:
             )
             if response.status_code == 200:
                 return response.json()
-        except:
-            pass
-        return None
+            else:
+                print(f"获取深度数据失败: HTTP {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            print(f"获取深度数据错误: {e}")
+            return None
     
     def place_order(self, symbol: str, side: str, order_type: str,
                    quantity: str, price: str, time_in_force: str = 'GTC') -> Optional[Dict[str, Any]]:

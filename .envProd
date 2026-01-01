@@ -1,38 +1,87 @@
-# 生产环境配置文件
-# CentOS服务器配置 - /www/wwwroot/aster_auto
+# 生产环境配置
+# 此文件用于生产环境部署
 
-# 环境标识
-ENVIRONMENT=production
-
-# 数据库配置
+# ===========================================
+# 📁 数据库配置 (生产环境)
+# ===========================================
+# 生产环境数据库配置，请根据实际环境修改
 DB_HOST=localhost
 DB_PORT=3306
-DB_USERNAME=root
-DB_PASSWORD=zaq12WSX
-DB_DATABASE=aster_auto
+DB_USERNAME=aster_prod
+DB_PASSWORD=CHANGE_THIS_IN_PRODUCTION
+DB_DATABASE=aster_auto_prod
 
-# Flask应用配置
-FLASK_SECRET_KEY=your-production-secret-key-very-long-and-secure
+# ===========================================
+# 🌐 Flask应用配置 (生产环境)
+# ===========================================
+# 生产环境Flask配置
+FLASK_SECRET_KEY=CHANGE_THIS_TO_RANDOM_SECRET_KEY
 FLASK_HOST=0.0.0.0
 FLASK_PORT=5000
-FLASK_DEBUG=False
+FLASK_DEBUG=false
 
-# 安全配置
-ENCRYPTION_KEY=dev-encryption-key-32-chars-here
+# ===========================================
+# 🔐 加密配置 (生产环境)
+# ===========================================
+# 生产环境加密密钥，必须是32字符，请更改为随机密钥
+ENCRYPTION_KEY=CHANGE_THIS_TO_32_CHAR_SECRET_KEY
 
-# 日志配置
-LOG_LEVEL=INFO
-LOG_DIR=/www/wwwroot/aster_auto/task_logs
-MAX_LOG_FILES=30
-
-# 代理配置
-PROXY_ENABLED=False
+# ===========================================
+# 🌍 代理配置 (生产环境)
+# ===========================================
+# 生产环境通常不使用本地代理
+PROXY_ENABLED=false
 PROXY_HOST=127.0.0.1
 PROXY_PORT=7890
 PROXY_TYPE=socks5
 
-# API主机配置
+# ===========================================
+# 🌐 Smartproxy配置 (生产环境)
+# ===========================================
+# 为每个任务分配独立美国IP - 粘性会话(60分钟)
+SMARTPROXY_ENABLED=true
+SMARTPROXY_BASE_USERNAME=user-sp9y3nhxbw-sessionduration-60
+SMARTPROXY_PASSWORD=ez8m5F~gl6jG9snvPU
+SMARTPROXY_RESIDENTIAL_HOST=gate.decodo.com
+SMARTPROXY_RESIDENTIAL_PORT=10001
+SMARTPROXY_DATACENTER_HOST=gate.decodo.com
+SMARTPROXY_SESSION_DURATION=60
+
+# ===========================================
+# 📝 日志配置 (生产环境)
+# ===========================================
+LOG_LEVEL=INFO
+LOG_DIR=logs
+MAX_LOG_FILES=30
+
+# ===========================================
+# 🏠 API主机配置 (生产环境)
+# ===========================================
 FUTURES_HOST=https://fapi.asterdex.com
 SPOT_HOST=https://sapi.asterdex.com
-FUTURES_TESTNET_HOST=https://testnet-fapi.asterdex.com
-SPOT_TESTNET_HOST=https://testnet-sapi.asterdex.com
+
+# ===========================================
+# 🔧 环境设置
+# ===========================================
+ENVIRONMENT=production
+
+# ===========================================
+# 🔐 生产环境安全提醒
+# ===========================================
+# 
+# ⚠️  重要安全提醒：
+# 1. 请务必修改所有包含 "CHANGE_THIS" 的配置项
+# 2. 数据库密码应使用强密码
+# 3. Flask密钥应使用随机字符串
+# 4. 加密密钥必须是32字符且保密
+# 5. Smartproxy凭证请从官方获取
+# 6. 定期轮换敏感凭证
+#
+# 生产环境部署检查清单：
+# □ 数据库配置已更新
+# □ 所有密钥已更改为生产值
+# □ Smartproxy凭证已配置
+# □ 日志目录权限正确
+# □ 防火墙规则已设置
+# □ SSL证书已配置 (如需要)
+#
