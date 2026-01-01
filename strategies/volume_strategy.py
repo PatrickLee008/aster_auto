@@ -1671,8 +1671,11 @@ class VolumeStrategy:
                 self.auto_purchased = total_purchased
                 return True
             elif shortage_final < 1:
-                # 如果只差不到1个，视为足够（避免因为小数量无法交易而卡住）
-                self.log(f"⚠️ 余额差异很小({shortage_final:.2f})，视为足够: {final_balance:.2f}", "warning")
+                # 如果只差不到1个，调整交易数量为实际可用余额
+                self.log(f"⚠️ 余额差异很小({shortage_final:.2f})，调整交易数量为实际余额: {final_balance:.2f}", "warning")
+                # 重要：更新交易数量为实际可用的余额
+                self.quantity = final_balance
+                self.log(f"💡 交易数量已调整为: {self.quantity:.2f}")
                 self.auto_purchased = total_purchased
                 return True
             elif batch_count >= max_batches:
