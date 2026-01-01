@@ -124,6 +124,24 @@ class VolumeStrategy:
         """外部请求停止"""
         self.log("📢 外部请求停止策略...")
         self.stop_requested = True
+
+    def smart_balance_check(self) -> float:
+        """智能余额检查：先清理未成交订单释放冻结资金，再查询真实可用余额"""
+        try:
+            # 1. 先清理未成交订单，释放冻结的资金
+            self.log("🧹 智能余额检查：先清理未成交订单释放冻结资金")
+            self.check_and_cancel_pending_orders()
+            
+            # 2. 获取清理后的真实可用余额
+            available_balance = self.get_asset_balance()
+            self.log(f"💰 清理后可用余额: {available_balance:.2f}")
+            
+            return available_balance
+            
+        except Exception as e:
+            self.log(f"❌ 智能余额检查失败: {e}", "error")
+            # 降级到直接查询余额
+            return self.get_asset_balance()
     
     def log(self, message, level='info'):
         """记录日志"""
@@ -425,12 +443,16 @@ class VolumeStrategy:
         self.log(f"生成交易价格: {trade_price:.5f}, 订单价值: {trade_price * float(self.quantity):.2f} USDT")
         return trade_price
     
-    def place_sell_order(self, price: float) -> Optional[Dict[str, Any]]:
+    def place_sell_order(self, price: float, quantity: float = None) -> Optional[Dict[str, Any]]:
         """下达卖出订单"""
         try:
+            # 使用传入的数量或默认数量
+            if quantity is None:
+                quantity = float(self.quantity)
+            
             # 确保数量精度正确，使用交易对的step_size
             import math
-            adjusted_quantity = math.floor(float(self.quantity) * 100) / 100
+            adjusted_quantity = math.floor(quantity * 100) / 100
             quantity_str = self.format_quantity(adjusted_quantity)
             
             # 格式化价格，使用交易对的tick_size
@@ -1993,14 +2015,24 @@ class VolumeStrategy:
         if round_num % 10 == 1:
             self._auto_adjust_parameters()
         
-        # 智能跳过检查 - 方案3优化
-        if self._should_skip_order_check(round_num):
-            self.log(f"🧠 智能跳过未成交订单检查 (轮次 {round_num})")
-        else:
-            # 容错处理：检查并清理未成交订单
-            if not self.check_and_cancel_pending_orders():
-                self.log(f"❌ 清理未成交订单失败，跳过本轮", "error")
+        # 智能余额检查：先清理订单释放资金，再获取真实可用余额
+        available_balance = self.smart_balance_check()
+        
+        # 检查余额是否足够本轮交易
+        required_quantity = float(self.quantity)
+        if available_balance < required_quantity:
+            self.log(f"⚠️ 可用余额不足: {available_balance:.2f} < {required_quantity:.2f}", "warning")
+            
+            # 如果差异较小（1个以内），调整交易数量
+            if available_balance > 0 and required_quantity - available_balance <= 1.0:
+                self.log(f"💡 调整交易数量为可用余额: {available_balance:.2f}")
+                actual_quantity = available_balance
+            else:
+                self.log(f"❌ 余额不足且差异过大，跳过本轮", "error")
                 return False
+        else:
+            actual_quantity = required_quantity
+            self.log(f"✅ 余额充足: {available_balance:.2f} >= {required_quantity:.2f}")
         
         # 初始化本轮状态
         round_completed = False
@@ -2030,7 +2062,7 @@ class VolumeStrategy:
             self.log(f"=== 第{round_num}轮: 价格生成完成 {trade_price:.5f}, 开始下单 ===", 'info')
             
             # 3. 有序快速执行：先发起卖出，立即发起买入
-            self.log(f"有序提交订单: {self.quantity} {self.symbol} @ {trade_price:.5f}")
+            self.log(f"有序提交订单: {actual_quantity} {self.symbol} @ {trade_price:.5f}")
             
             import threading
             import time
@@ -2053,11 +2085,11 @@ class VolumeStrategy:
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                     # 立即提交卖出任务
-                    sell_future = executor.submit(self.place_sell_order, trade_price)
+                    sell_future = executor.submit(self.place_sell_order, trade_price, actual_quantity)
                     
                     # 优化延迟为20ms，减少延迟提高效率
                     time.sleep(0.02)  # 20ms延迟
-                    buy_future = executor.submit(self.place_buy_order, trade_price)
+                    buy_future = executor.submit(self.place_buy_order, trade_price, actual_quantity)
                     
                     # 并行等待结果 - 任何订单提交失败都会抛出异常
                     try:
