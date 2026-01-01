@@ -79,21 +79,25 @@ class SmartproxyManager:
     
     def _create_residential_proxy(self, task_id: int) -> Dict:
         """创建住宅代理（粘性会话）"""
-        # Smartproxy粘性会话格式：base_username 已包含完整信息
-        # 基础用户名：user-sp9y3nhxbw-sessionduration-60
-        # 无需额外添加session标识符，Smartproxy会自动管理
+        # Smartproxy粘性会话格式：确保获得美国IP
+        # 在用户名中明确指定美国+会话ID
+        session_id = f"task{task_id:04d}"
+        
+        # 尝试在用户名中明确指定国家和会话
+        username_with_country = f"{self.base_username}-country-US-session-{session_id}"
         
         return {
             'proxy_type': 'residential',
             'protocol': 'http',  # 使用HTTP协议，适合API请求
             'host': self.residential_endpoint,
             'port': self.residential_port,
-            'username': self.base_username,  # 直接使用配置的粘性用户名
+            'username': username_with_country,  # 明确指定美国+独立会话
             'password': self.password,
             'country': 'US',
             'task_id': task_id,
+            'session_id': session_id,
             'sticky_duration': f'{self.session_duration}min',
-            'display_info': f"美国住宅IP (粘性会话: {self.session_duration}分钟, 任务{task_id})"
+            'display_info': f"美国住宅IP (会话: {session_id}, {self.session_duration}分钟)"
         }
     
     def _create_datacenter_proxy(self, task_id: int) -> Dict:
