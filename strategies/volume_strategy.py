@@ -281,9 +281,11 @@ class VolumeStrategy:
                 secret_key = config.get('secret_key')
                 
                 if api_key and secret_key:
+                    # 传递代理配置给交易客户端
                     self.client = SimpleTradingClient(
                         api_key=api_key,
-                        secret_key=secret_key
+                        secret_key=secret_key,
+                        proxy_config=self.wallet_config  # 传递完整的钱包配置（包含代理信息）
                     )
                     self.market_client = MarketTradingClient(
                         api_key=api_key,

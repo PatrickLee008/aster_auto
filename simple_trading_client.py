@@ -14,7 +14,7 @@ from config_env import SPOT_CONFIG, PROXY_CONFIG
 class SimpleTradingClient:
     """简化交易客户端 - 确保签名验证成功"""
     
-    def __init__(self, api_key=None, secret_key=None):
+    def __init__(self, api_key=None, secret_key=None, proxy_config=None):
         """初始化客户端"""
         if not api_key or not secret_key:
             raise ValueError("API密钥和密钥不能为空，必须从钱包配置中提供")
@@ -22,19 +22,38 @@ class SimpleTradingClient:
         self.secret_key = secret_key
         self.host = 'https://sapi.asterdex.com'
         
-        # 设置代理
-        if PROXY_CONFIG['enabled']:
+        # 优先使用传入的代理配置（来自任务运行器）
+        if proxy_config and proxy_config.get('proxy_enabled', False):
+            proxy_host = proxy_config.get('proxy_host')
+            proxy_port = proxy_config.get('proxy_port')
+            proxy_auth = proxy_config.get('proxy_auth')
+            
+            if proxy_auth:
+                proxy_url = f"http://{proxy_auth}@{proxy_host}:{proxy_port}"
+            else:
+                proxy_url = f"http://{proxy_host}:{proxy_port}"
+            
+            self.proxies = {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+            print(f"简化交易客户端初始化完成")
+            print(f"使用任务专用代理: {proxy_config.get('proxy_type', 'unknown')} - {proxy_config.get('country', 'unknown')}")
+            if proxy_config.get('current_ip'):
+                print(f"代理IP: {proxy_config.get('current_ip')}")
+        # 回退到全局代理配置
+        elif PROXY_CONFIG['enabled']:
             proxy_url = f"{PROXY_CONFIG['type']}://{PROXY_CONFIG['host']}:{PROXY_CONFIG['port']}"
             self.proxies = {
                 'http': proxy_url,
                 'https': proxy_url
             }
+            print(f"简化交易客户端初始化完成")
+            print(f"使用全局代理: {self.proxies['https']}")
         else:
             self.proxies = None
-        
-        print(f"简化交易客户端初始化完成")
-        if self.proxies:
-            print(f"使用代理: {self.proxies['https']}")
+            print(f"简化交易客户端初始化完成")
+            print("未启用代理")
     
     def get_server_time(self) -> int:
         """获取服务器时间"""
