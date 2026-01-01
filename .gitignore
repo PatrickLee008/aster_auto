@@ -73,3 +73,5 @@ logs/
 # 配置文件备份
 *.backup
 *.bak
+/.env
+/.envProd
