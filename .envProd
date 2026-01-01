@@ -4,12 +4,12 @@
 # ===========================================
 # 📁 数据库配置 (生产环境)
 # ===========================================
-# 生产环境数据库配置，请根据实际环境修改
+# 生产环境数据库配置
 DB_HOST=localhost
 DB_PORT=3306
-DB_USERNAME=aster_prod
-DB_PASSWORD=CHANGE_THIS_IN_PRODUCTION
-DB_DATABASE=aster_auto_prod
+DB_USERNAME=root
+DB_PASSWORD=zaq12WSX
+DB_DATABASE=aster_auto
 
 # ===========================================
 # 🌐 Flask应用配置 (生产环境)
