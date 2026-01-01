@@ -502,6 +502,12 @@ class VolumeStrategy:
         if not order_ids or not self.batch_query_enabled:
             # 降级到单个查询
             return self._fallback_single_order_query(order_ids)
+        
+        # 检查客户端是否支持批量查询
+        if not hasattr(self.client, 'get_orders'):
+            self.log(f"⚠️ 客户端不支持批量查询，降级到单个查询")
+            self.batch_query_enabled = False  # 禁用批量查询避免重复错误
+            return self._fallback_single_order_query(order_ids)
             
         try:
             self.log(f"📊 批量查询 {len(order_ids)} 个订单状态")
@@ -694,6 +700,11 @@ class VolumeStrategy:
     
     def cancel_all_open_orders_batch(self) -> tuple:
         """批量取消未成交订单 - 方案3优化"""
+        # 检查客户端是否支持批量取消
+        if not hasattr(self.client, 'cancel_open_orders'):
+            self.log(f"⚠️ 客户端不支持批量取消，使用原有逻辑")
+            return 0.0, 0.0  # 返回空结果，让原有逻辑处理
+            
         try:
             self.log("🔍 批量处理未成交订单...")
             
