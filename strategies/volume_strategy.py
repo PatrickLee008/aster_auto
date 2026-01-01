@@ -45,9 +45,8 @@ class VolumeStrategy:
         # API优化参数 - 方案3智能优化
         self.batch_query_enabled = True  # 启用批量查询
         self.cache_enabled = True  # 启用缓存
-        self.orderbook_cache_time = 0.0  # 禁用订单簿缓存，实时获取最新价格
+        self.orderbook_cache_time = 0.5  # 启用500ms订单簿缓存减少API调用
         self.balance_cache_time = 0.0  # 余额缓存时间(秒) - 禁用！余额必须实时获取
-        self.smart_skip_enabled = True  # 启用智能跳过
         
         # 缓存存储
         self.cached_orderbook = None
@@ -55,10 +54,8 @@ class VolumeStrategy:
         self.last_orderbook_time = 0
         self.last_balance_time = 0
         
-        # 智能预判状态
-        self.consecutive_success = 0  # 连续成功次数
+        # API错误追踪
         self.recent_api_errors = 0  # 最近API错误次数
-        self.last_error_time = 0  # 上次错误时间
         
         # 统计数据
         self.original_balance = 0.0  # 真正的原始余额（用于最终恢复）
@@ -93,6 +90,9 @@ class VolumeStrategy:
         
         # 防重复统计的已处理订单集合
         self.processed_orders = set()
+        
+        # API优化：延迟批量处理的订单列表
+        self.completed_order_ids = []  # 已完成但未统计的订单ID
         
         # 优雅停止标志
         self.stop_requested = False
@@ -422,31 +422,122 @@ class VolumeStrategy:
             self.log(f"获取订单薄失败: {e}", 'error')
             return None
     
-    def generate_trade_price(self, bid_price: float, ask_price: float) -> float:
-        """生成交易价格，更接近市场中心价提高成交率"""
+    
+    def generate_optimized_trade_price(self, bid_price: float, ask_price: float, strategy: str = 'narrow_spread') -> float:
+        """优化的交易价格生成策略"""
+        
         if bid_price >= ask_price:
-            # 如果买卖价差很小或无价差，使用买一价格作为基准
+            # 无价差时，使用买一价格
             base_price = bid_price
         else:
-            # 优化策略：更接近买一卖一的中心价格，提高成交率
             price_range = ask_price - bid_price
-            # 改为在价格区间的45%-55%位置生成价格（接近中心）
-            offset = random.uniform(0.45, 0.55)
-            base_price = bid_price + (price_range * offset)
             
-        # 使用正确的tick size格式化价格
+            if strategy == 'narrow_spread':
+                # 策略1: 窄价差策略 (70%-85%) - 提高自成交概率
+                offset = random.uniform(0.70, 0.85)
+                base_price = bid_price + (price_range * offset)
+                self.log(f"使用窄价差策略，偏移: {offset:.2f}")
+                
+            elif strategy == 'mid_price':
+                # 策略2: 中位价策略 - 平衡风险
+                base_price = (bid_price + ask_price) / 2
+                self.log(f"使用中位价策略")
+                
+            elif strategy == 'adaptive':
+                # 策略3: 自适应策略 - 根据价差大小调整
+                if price_range <= 0.000200:  # 价差很小
+                    offset = random.uniform(0.80, 0.90)  # 更激进
+                else:
+                    offset = random.uniform(0.60, 0.75)  # 更保守
+                base_price = bid_price + (price_range * offset)
+                self.log(f"使用自适应策略，价差: {price_range:.6f}, 偏移: {offset:.2f}")
+            else:
+                # 默认策略
+                offset = random.uniform(0.45, 0.55)
+                base_price = bid_price + (price_range * offset)
+        
+        # 格式化价格
         formatted_price = self.format_price(base_price)
         trade_price = float(formatted_price)
         
-        # 检查订单价值是否满足5 USDT最小限制
+        # 检查订单价值
         order_value = trade_price * float(self.quantity)
         if order_value < 5.0:
-            # 如果订单价值不足，调整价格确保满足最小限制
             min_price = 5.0 / float(self.quantity)
             trade_price = max(trade_price, round(min_price, 5))
         
-        self.log(f"生成交易价格: {trade_price:.5f}, 订单价值: {trade_price * float(self.quantity):.2f} USDT")
+        self.log(f"优化价格生成 [{strategy}]: {trade_price:.5f}, 买一: {bid_price:.5f}, 卖一: {ask_price:.5f}")
         return trade_price
+    
+    
+    def execute_optimized_round(self, actual_quantity: float) -> tuple:
+        """执行优化的交易轮次"""
+        
+        # 获取订单簿
+        book_data = self.get_order_book()
+        if not book_data:
+            return None, None
+            
+        # 计算价差
+        spread = book_data['ask_price'] - book_data['bid_price']
+        self.log(f"当前价差: {spread:.6f}")
+        
+        # 根据价差选择策略
+        if spread <= 0.000100:  # 价差很小，使用窄价差策略
+            strategy = 'narrow_spread'
+            delay_ms = 5  # 5ms延迟
+        elif spread <= 0.000300:  # 中等价差，使用自适应策略
+            strategy = 'adaptive'
+            delay_ms = 8  # 8ms延迟
+        else:  # 价差较大，使用中位价策略
+            strategy = 'mid_price'
+            delay_ms = 10  # 10ms延迟
+        
+        # 生成优化价格
+        trade_price = self.generate_optimized_trade_price(
+            book_data['bid_price'], 
+            book_data['ask_price'], 
+            strategy
+        )
+        
+        self.log(f"🎯 优化策略执行 - 策略: {strategy}, 价格: {trade_price:.5f}, 延迟: {delay_ms}ms")
+        
+        # 执行优化下单
+        import concurrent.futures
+        import time
+        
+        sell_order = None
+        buy_order = None
+        
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                # 提交卖单
+                sell_future = executor.submit(self.place_sell_order, trade_price, actual_quantity)
+                
+                # 优化延迟
+                time.sleep(delay_ms / 1000.0)
+                
+                # 提交买单
+                buy_future = executor.submit(self.place_buy_order, trade_price, actual_quantity)
+                
+                # 获取结果
+                try:
+                    sell_order = sell_future.result(timeout=10)
+                    buy_order = buy_future.result(timeout=10)
+                except Exception as e:
+                    self.log(f"❌ 优化下单异常: {e}", 'error')
+                    return None, None
+            
+            if sell_order and buy_order:
+                self.log(f"✅ 优化订单提交成功 - 卖单: {sell_order.get('orderId')}, 买单: {buy_order.get('orderId')}")
+                return sell_order, buy_order
+            else:
+                self.log("❌ 优化订单提交失败")
+                return None, None
+                
+        except Exception as e:
+            self.log(f"❌ 优化执行异常: {e}", 'error')
+            return None, None
     
     def place_sell_order(self, price: float, quantity: float = None) -> Optional[Dict[str, Any]]:
         """下达卖出订单"""
@@ -828,62 +919,29 @@ class VolumeStrategy:
         
         return canceled_buy_qty, canceled_sell_qty
     
-    def _should_skip_order_check(self, round_num: int) -> bool:
-        """智能预判是否可以跳过未成交订单检查"""
-        if not self.smart_skip_enabled:
-            return False
-        
-        # 如果最近有API错误，不跳过
-        if self.recent_api_errors > 0 and time.time() - self.last_error_time < 30:
-            return False
-        
-        # 第1轮不跳过
-        if round_num == 1:
-            return False
-        
-        # 连续成功次数越多，跳过概率越高
-        if self.consecutive_success >= 10:
-            # 10轮后每5轮检查一次
-            return round_num % 5 != 1
-        elif self.consecutive_success >= 5:
-            # 5轮后每3轮检查一次  
-            return round_num % 3 != 1
-        else:
-            # 前5轮每轮都检查
-            return False
     
     def _update_success_stats(self, success: bool):
         """更新成功统计"""
-        if success:
-            self.consecutive_success += 1
+        if success and self.recent_api_errors > 0:
             # 成功时减少错误计数
-            if self.recent_api_errors > 0:
-                self.recent_api_errors = max(0, self.recent_api_errors - 1)
-        else:
-            self.consecutive_success = 0
+            self.recent_api_errors = max(0, self.recent_api_errors - 1)
     
     def _auto_adjust_parameters(self):
-        """自适应参数调节 - 方案3优化"""
-        current_time = time.time()
+        """自适应参数调节 - 根据API错误率动态调整"""
         
         # 根据API错误率调整
         if self.recent_api_errors >= 5:
             self.log("⚠️ API错误率过高，切换到保守模式")
             self.batch_query_enabled = False
             self.cache_enabled = False
-            self.smart_skip_enabled = False
         elif self.recent_api_errors >= 3:
-            self.log("⚠️ 检测到API错误，部分禁用优化")
+            self.log("⚠️ 检测到API错误，禁用批量查询")
             self.batch_query_enabled = False
-        else:
-            # 错误率正常，可以启用优化
-            if not self.batch_query_enabled and self.consecutive_success >= 3:
-                self.log("✅ 错误率正常，重新启用批量查询")
+        elif self.recent_api_errors == 0:
+            # 错误率正常，启用所有优化
+            if not self.batch_query_enabled:
+                self.log("✅ API稳定，重新启用批量查询")
                 self.batch_query_enabled = True
-        
-        # 订单簿缓存已禁用，不再动态调整
-        # 余额缓存始终保持为0，确保实时准确性
-        self.balance_cache_time = 0.0
 
     def check_and_cancel_pending_orders(self) -> bool:
         """容错处理：检查并取消上一轮可能遗留的未成交订单"""
@@ -1133,54 +1191,58 @@ class VolumeStrategy:
             self.log(f"❌ 计算手续费时出错: {e}", "error")
             return 0.0
     
-    def _update_filled_order_statistics(self, order_id: int, side: str):
-        """更新已成交订单的统计数据"""
+    def _batch_update_statistics(self):
+        """批量更新统计数据 - API优化版本"""
+        if not self.completed_order_ids:
+            return
+        
         try:
-            # 检查是否已经处理过此订单，避免重复统计
-            if order_id in self.processed_orders:
-                self.log(f"📋 订单 {order_id} 已处理过，跳过重复统计")
-                return
-                
-            # 获取订单详细信息
-            order_info = self.client.get_order(self.symbol, order_id)
+            self.log(f"📊 批量更新 {len(self.completed_order_ids)} 个订单的统计数据")
             
-            if order_info and order_info.get('status') == 'FILLED':
-                executed_qty = float(order_info.get('executedQty', 0))
-                avg_price = float(order_info.get('avgPrice', 0))
+            # 分批处理，每次最多处理5个订单避免单次API调用过多
+            batch_size = 5
+            for i in range(0, len(self.completed_order_ids), batch_size):
+                batch = self.completed_order_ids[i:i+batch_size]
                 
-                if executed_qty > 0 and avg_price > 0:
-                    # 判断是否为maker（限价单通常是maker，但不一定）
-                    # 如果API返回了maker信息，使用它；否则假设限价单为maker
-                    is_maker = order_info.get('isMaker', True)  # 默认假设限价单是maker
-                    
-                    # 计算手续费
-                    fee = self._calculate_fee_from_order_result(order_info, is_maker=is_maker)
-                    # 更新统计数据
-                    self._update_trade_statistics(side, executed_qty, avg_price, fee)
-                    
-                    # 标记订单为已处理
-                    self.processed_orders.add(order_id)
-                    
-                    maker_type = "Maker" if is_maker else "Taker"
-                    # 限价单统计已更新
+                for order_id in batch:
+                    if order_id not in self.processed_orders:
+                        try:
+                            # 这里仍需要单独查询，因为批量查询通常只返回状态，不返回交易详情
+                            order_info = self.client.get_order(self.symbol, order_id)
+                            
+                            if order_info and order_info.get('status') == 'FILLED':
+                                executed_qty = float(order_info.get('executedQty', 0))
+                                avg_price = float(order_info.get('avgPrice', 0))
+                                
+                                if executed_qty > 0 and avg_price > 0:
+                                    # 根据订单信息判断买卖方向
+                                    side = order_info.get('side', 'UNKNOWN')
+                                    is_maker = order_info.get('isMaker', True)
+                                    
+                                    # 计算手续费并更新统计
+                                    fee = self._calculate_fee_from_order_result(order_info, is_maker=is_maker)
+                                    self._update_trade_statistics(side, executed_qty, avg_price, fee)
+                                    
+                                    # 标记为已处理
+                                    self.processed_orders.add(order_id)
+                                    
+                        except Exception as e:
+                            self.log(f"⚠️ 处理订单 {order_id} 统计时出错: {e}", "warning")
                 
+                # 批次间短暂延迟
+                if i + batch_size < len(self.completed_order_ids):
+                    import time
+                    time.sleep(0.1)
+            
+            # 清空待处理列表
+            processed_count = len(self.completed_order_ids)
+            self.completed_order_ids.clear()
+            self.log(f"✅ 完成 {processed_count} 个订单的批量统计更新")
+            
         except Exception as e:
-            self.log(f"❌ 更新订单统计时出错: {e}", "error")
+            self.log(f"❌ 批量统计更新失败: {e}", "error")
     
-    def get_market_depth(self) -> dict:
-        """获取市场深度数据"""
-        try:
-            depth = self.client.get_depth(symbol=self.symbol, limit=20)
-            if not depth or 'asks' not in depth or 'bids' not in depth:
-                return None
-            
-            return {
-                'bids': [[float(bid[0]), float(bid[1])] for bid in depth['bids']],  # [[价格, 数量], ...]
-                'asks': [[float(ask[0]), float(ask[1])] for ask in depth['asks']]   # [[价格, 数量], ...]
-            }
-        except Exception as e:
-            self.log(f"获取市场深度失败: {e}")
-            return None
+    
     
     def place_market_buy_order(self, quantity: float) -> Optional[Dict[str, Any]]:
         """下达市价买入订单"""
@@ -1452,137 +1514,6 @@ class VolumeStrategy:
             self.log(f"❌ 最终余额检查失败，差异: {final_diff:.2f} (>0.1)", 'error')
             return False
     
-    def emergency_buy(self, target_sell_price: float) -> bool:
-        """智能紧急买入 - 逐档补货直到完全补齐卖出数量"""
-        try:
-            self.log("执行风险控制 - 逐档智能补货")
-            self.log(f"目标价格: {target_sell_price:.5f} (原卖出价格)")
-            
-            target_quantity = float(self.quantity)  # 需要补回的总数量
-            filled_quantity = 0.0  # 已补回的数量
-            total_cost = 0.0  # 总成本
-            buy_orders = []  # 记录所有买入订单
-            
-            self.log(f"需要补回数量: {target_quantity:.2f} {self.symbol.replace('USDT', '')}")
-            
-            while filled_quantity < target_quantity:
-                remaining_quantity = target_quantity - filled_quantity
-                self.log(f"\n还需补回: {remaining_quantity:.2f}")
-                
-                # 获取当前订单薄深度
-                depth_data = self.client.get_depth(self.symbol, 20)  # 获取更多档深度
-                
-                if not depth_data or 'asks' not in depth_data:
-                    self.log(f"❌ 无法获取订单薄深度", "error")
-                    break
-                
-                asks = depth_data['asks']  # 卖单 [[price, quantity], ...]
-                                
-                if not asks:
-                    self.log(f"❌ 卖盘为空", "error")
-                    break
-                
-                # 选择最优价格（最接近目标价格的卖单）
-                best_ask = None
-                min_loss = float('inf')
-                
-                for ask in asks:
-                    ask_price = float(ask[0])
-                    ask_quantity = float(ask[1])
-                    
-                    if ask_quantity > 0:  # 确保有数量
-                        loss = max(0, ask_price - target_sell_price)  # 计算损失
-                        if loss < min_loss:
-                            min_loss = loss
-                            best_ask = ask
-                
-                if not best_ask:
-                    self.log(f"❌ 没有找到合适的卖单", "error")
-                    break
-                
-                ask_price = float(best_ask[0])
-                ask_quantity = float(best_ask[1])
-                
-                # 决定本次买入数量
-                buy_quantity = min(remaining_quantity, ask_quantity)
-                buy_quantity = round(buy_quantity, 2)  # 保持2位小数精度
-                
-                # 检查订单价值是否满足5 USDT最小限制
-                order_value = buy_quantity * ask_price
-                if order_value < 5.0:
-                    # 调整数量以满足最小订单价值
-                    min_quantity = 5.0 / ask_price
-                    buy_quantity = min(remaining_quantity, min_quantity)
-                    buy_quantity = round(buy_quantity, 2)
-                    order_value = buy_quantity * ask_price
-                    
-                    self.log(f"调整买入数量以满足5 USDT限制: {buy_quantity:.2f}")
-                    self.log(f"调整后订单价值: {order_value:.4f} USDT")
-                    
-                    # 如果调整后仍然不足5 USDT，跳过这个价格
-                    if order_value < 5.0:
-                        self.log(f"⚠️  价格 {ask_price:.5f} 无法满足5 USDT限制，跳过", "warning")
-                        continue
-                
-                # 确保不超买（买入数量不超过剩余需求）
-                if buy_quantity > remaining_quantity:
-                    buy_quantity = remaining_quantity
-                    buy_quantity = round(buy_quantity, 2)
-                    order_value = buy_quantity * ask_price
-                    self.log(f"限制买入数量不超过剩余需求: {buy_quantity:.2f}")
-                
-                                                                
-                # 执行买入
-                result = self.place_buy_order(ask_price, buy_quantity)
-                
-                if result:
-                    buy_order_id = result.get('orderId')
-                    buy_orders.append(buy_order_id)
-                    self.log(f"✅ 买入订单成功: ID {buy_order_id}")
-                    
-                    # 简单等待成交确认
-                    time.sleep(0.3)
-                    
-                    # 简化处理：假设按期望数量完全成交
-                    filled_quantity += buy_quantity
-                    cost = buy_quantity * ask_price
-                    total_cost += cost
-                    
-                    self.log(f"✅ 补货成交: {buy_quantity:.2f} @ {ask_price:.5f}")
-                    self.log(f"累计补回: {filled_quantity:.2f}/{target_quantity:.2f}")
-                    self.log(f"累计成本: {total_cost:.4f} USDT")
-                else:
-                    self.log(f"❌ 买入订单失败", "error")
-                    break
-                
-                # 防止无限循环
-                if len(buy_orders) >= 10:
-                    self.log(f"⚠️  已尝试10次买入，停止补货", "warning")
-                    break
-            
-            # 总结补货结果
-            self.log(f"\n=== 补货完成 ===")
-            self.log(f"目标数量: {target_quantity:.2f}")
-            self.log(f"实际补回: {filled_quantity:.2f}")
-            self.log(f"补货率: {(filled_quantity/target_quantity)*100:.1f}%")
-            self.log(f"总成本: {total_cost:.4f} USDT")
-            
-            if target_cost := target_quantity * target_sell_price:
-                extra_cost = total_cost - target_cost
-                self.log(f"额外成本: {extra_cost:.4f} USDT")
-            
-            # 如果补货完成度达到95%以上认为成功
-            success_rate = filled_quantity / target_quantity
-            if success_rate >= 0.95:
-                self.log("✅ 补货基本完成")
-                return True
-            else:
-                self.log(f"❌ 补货未完全完成", "error")
-                return False
-                
-        except Exception as e:
-            self.log(f"补货过程错误: {e}")
-            return False
     
     def auto_purchase_if_insufficient(self) -> bool:
         """如果余额不足则自动补齐 - 按USDT价值分批买入"""
@@ -2067,424 +1998,142 @@ class VolumeStrategy:
             
             self.log(f"=== 第{round_num}轮: 订单薄获取成功，开始生成价格 ===", 'info')
             
-            # 2. 生成交易价格（偏向高价提高命中率）
-            trade_price = self.generate_trade_price(
-                book_data['bid_price'],  # 买一价格
-                book_data['ask_price']   # 卖一价格
-            )
+            # 2. 使用优化策略执行交易
+            self.log(f"=== 第{round_num}轮: 启用优化交易策略 ===", 'info')
             
-            # 强制日志：价格生成完成
-            self.log(f"=== 第{round_num}轮: 价格生成完成 {trade_price:.5f}, 开始下单 ===", 'info')
+            # 执行优化的交易轮次
+            sell_order, buy_order = self.execute_optimized_round(actual_quantity)
             
-            # 3. 有序快速执行：先发起卖出，立即发起买入
-            self.log(f"有序提交订单: {actual_quantity} {self.symbol} @ {trade_price:.5f}")
+            if not sell_order or not buy_order:
+                self.log(f"❌ 优化策略执行失败，跳过本轮", 'error')
+                return False
             
-            import threading
+            # 强制日志：订单已提交
+            self.log(f"=== 第{round_num}轮: 优化订单已提交，开始监控 ===", 'info')
+            
             import time
-            
-            self.log("执行顺序: 卖出 -> 买入 ")
             start_time = time.time()
             
-            # 强制日志：即将下单
-            self.log(f"=== 第{round_num}轮: 即将提交双向订单 ===", 'info')
-            
-            # 用于存储订单结果的变量
-            sell_order = None
-            buy_order = None
-            sell_exception = None
-            buy_exception = None
-            
-            # 最优方案：使用异步HTTP请求减少延迟
-            try:
-                # 使用线程池，50ms延迟
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                    # 立即提交卖出任务
-                    sell_future = executor.submit(self.place_sell_order, trade_price, actual_quantity)
-                    
-                    # 优化延迟为20ms，减少延迟提高效率
-                    time.sleep(0.02)  # 20ms延迟
-                    buy_future = executor.submit(self.place_buy_order, trade_price, actual_quantity)
-                    
-                    # 并行等待结果 - 任何订单提交失败都会抛出异常
-                    try:
-                        sell_order = sell_future.result(timeout=10)
-                        buy_order = buy_future.result(timeout=10)
-                    except Exception as result_e:
-                        # 检查是否是订单提交失败的异常
-                        if any(x in str(result_e) for x in ["订单提交失败", "订单执行异常"]):
-                            self.log(f"❌ 订单提交失败，终止任务: {result_e}", "error")
-                            raise Exception(f"任务失败 - {result_e}")
-                        
-                        # 其他异常（如超时等）尝试恢复
-                        self.log(f"获取并行结果异常: {result_e}")
-                        self.log("等待额外时间确保订单完全处理...")
-                        time.sleep(3)
-                        
-                        # 重新尝试获取结果，无论future是否done都尝试获取
-                        sell_order = None
-                        buy_order = None
-                        
-                        # 尝试获取卖出订单结果
-                        try:
-                            sell_order = sell_future.result(timeout=2)
-                            self.log(f"✅ 延迟获取到卖出订单结果")
-                        except Exception as e:
-                            # 检查是否是订单提交失败
-                            if any(x in str(e) for x in ["订单提交失败", "订单执行异常"]):
-                                self.log(f"❌ 卖出订单提交失败，终止任务: {e}", "error")
-                                raise Exception(f"任务失败 - {e}")
-                            self.log(f"延迟获取卖出订单结果失败: {e}")
-                            sell_order = None
-                        
-                        # 尝试获取买入订单结果
-                        try:
-                            buy_order = buy_future.result(timeout=2)
-                            self.log(f"✅ 延迟获取到买入订单结果")
-                        except Exception as e:
-                            # 检查是否是订单提交失败
-                            if any(x in str(e) for x in ["订单提交失败", "订单执行异常"]):
-                                self.log(f"❌ 买入订单提交失败，终止任务: {e}", "error")
-                                raise Exception(f"任务失败 - {e}")
-                            self.log(f"延迟获取买入订单结果失败: {e}")
-                            buy_order = None
-                        
-                        self.log(f"最终订单状态: 卖出={bool(sell_order)}, 买入={bool(buy_order)}")
-                        
-                        # 重要：即使获取结果失败，订单可能已经成功提交
-                        # 不要立即跳过，让后续的状态检查逻辑来判断实际情况
-                        if not sell_order and not buy_order:
-                            self.log(f"⚠️ 无法获取订单结果，但继续检查订单状态", "warning")
-                            # 创建临时订单对象以便后续状态检查
-                            sell_order = {'orderId': 'unknown_sell'}
-                            buy_order = {'orderId': 'unknown_buy'}
-                        
-            except Exception as e:
-                # 如果是任务失败的异常，直接向上传播
-                if "任务失败" in str(e):
-                    raise
-                # 其他异常记录并跳过本轮
-                self.log(f"执行异常: {e}")
-                self.log("并行执行失败，跳过本轮")
-                return False
-            
-            end_time = time.time()
-            self.log(f"有序下单耗时: {(end_time - start_time)*1000:.0f}毫秒")
-            
-            # 强制日志：下单完成
-            self.log(f"=== 第{round_num}轮: 双向下单完成，开始检查结果 ===", 'info')
-            
-            # 4. 检查异常和订单提交结果
-            if sell_exception:
-                self.log(f"❌ 卖出订单异常: {sell_exception}", "error")
-            if buy_exception:
-                self.log(f"❌ 买入订单异常: {buy_exception}", "error")
-            
-            # 确保订单对象存在
-            if not sell_order or not buy_order:
-                self.log(f"❌ 无法获取订单结果，本轮交易失败", "error")
-                return False
-            
-            # 5. 获取订单ID
+            # 获取订单ID
             sell_order_id = sell_order.get('orderId')
             buy_order_id = buy_order.get('orderId')
             
-            # 将有效的订单ID添加到跟踪列表
-            if sell_order_id and sell_order_id != 'unknown_sell':
+            # 将订单添加到跟踪列表
+            if sell_order_id:
                 self.pending_orders.append(sell_order_id)
-            if buy_order_id and buy_order_id != 'unknown_buy':
+            if buy_order_id:
                 self.pending_orders.append(buy_order_id)
             
-            # 处理未知订单ID的情况
-            has_unknown_orders = (sell_order_id == 'unknown_sell' or buy_order_id == 'unknown_buy')
+            self.log(f"✅ 优化策略订单提交成功 - 卖出:{sell_order_id} 买入:{buy_order_id}")
             
-            if has_unknown_orders:
-                self.log(f"⚠️ 检测到未知订单ID，改为通过余额变化判断交易结果", "warning")
-                self.log("等待5秒后检查余额变化...")
-                time.sleep(5)
-                
-                # 通过余额变化判断交易是否成功
-                current_balance = self.get_asset_balance()
-                balance_change = current_balance - initial_balance
-                
-                self.log(f"余额变化检测: 初始={initial_balance:.2f}, 当前={current_balance:.2f}, 变化={balance_change:.2f}")
-                
-                # 如果余额没有显著变化，说明交易可能未成功
-                if abs(balance_change) <= 0.01:
-                    self.log("💡 余额无显著变化，可能订单未成交或获取结果超时")
-                    self.log("跳过本轮，让订单自然处理")
-                    return False
-                else:
-                    self.log(f"💡 检测到余额变化，执行余额平衡补单")
-                    # 直接进行余额平衡
-                    balance_ok = self.ensure_balance_consistency(initial_balance)
-                    return balance_ok
-            else:
-                self.log(f"✅ 订单提交成功 - 卖出:{sell_order_id} 买入:{buy_order_id}")
+            # 优化策略订单监控
+            self.log(f"=== 第{round_num}轮: 开始监控优化订单 ===", 'info')
             
-            # 强制日志：开始状态检查
-            self.log(f"=== 第{round_num}轮: 开始检查订单状态 ===", 'info')
+            # 等待订单成交
+            time.sleep(self.order_check_timeout)
             
-            # 6. 等待2秒后检查订单成交状态（仅当有有效订单ID时）
-            time.sleep(self.order_check_timeout)  # 等待2秒
-            
-            # 使用批量查询检查买入和卖出订单状态 - 方案3优化
+            # 使用批量查询减少API调用
             if self.batch_query_enabled and buy_order_id and sell_order_id:
                 order_statuses = self.check_multiple_order_status([buy_order_id, sell_order_id])
                 buy_status = order_statuses.get(str(buy_order_id), 'UNKNOWN')
                 sell_status = order_statuses.get(str(sell_order_id), 'UNKNOWN')
+                self.log(f"批量查询订单状态 - 买入: {buy_status}, 卖出: {sell_status}")
             else:
                 # 降级到单个查询
-                buy_status = self.check_order_status(buy_order_id)
-                sell_status = self.check_order_status(sell_order_id)
+                buy_status = self.check_order_status(buy_order_id) if buy_order_id else 'UNKNOWN'
+                sell_status = self.check_order_status(sell_order_id) if sell_order_id else 'UNKNOWN'
+                self.log(f"单独查询订单状态 - 买入: {buy_status}, 卖出: {sell_status}")
             
-            # 强制日志：状态检查完成
-            self.log(f"=== 第{round_num}轮: 状态检查完成 买入:{buy_status} 卖出:{sell_status} ===", 'info')
-            
-            # 获取详细订单信息以查看执行数量
-            buy_details = self.get_order_details(buy_order_id)
-            sell_details = self.get_order_details(sell_order_id)
-            
-            # 分析订单执行情况
+            # 分析成交情况
             buy_filled = buy_status == 'FILLED'
             sell_filled = sell_status == 'FILLED'
-            buy_partially = buy_status == 'PARTIALLY_FILLED'
-            sell_partially = sell_status == 'PARTIALLY_FILLED'
-            
-            self.log(f"订单状态检查: 买入={buy_status}, 卖出={sell_status}")
-            
-            # 显示执行数量信息
-            if buy_details:
-                buy_executed = float(buy_details.get('executedQty', 0))
-                buy_original = float(buy_details.get('origQty', 0))
-                self.log(f"买入执行情况: {buy_executed}/{buy_original}")
-            else:
-                buy_executed = 0
-                buy_original = float(self.quantity)
-                
-            if sell_details:
-                sell_executed = float(sell_details.get('executedQty', 0))
-                sell_original = float(sell_details.get('origQty', 0))
-                self.log(f"卖出执行情况: {sell_executed}/{sell_original}")
-            else:
-                sell_executed = 0
-                sell_original = float(self.quantity)
-            
-            # 7. 根据成交情况处理
-            need_balance_check = False
             
             if buy_filled and sell_filled:
-                self.log("✅ 买卖订单都已成交，无需补单，直接进入下一轮")
+                # 双向成交 - 优化策略的目标结果
+                self.log("🎯 优化策略成功！双向订单都已成交")
                 
-                # 更新限价单统计数据
-                self._update_filled_order_statistics(buy_order_id, 'BUY')
-                self._update_filled_order_statistics(sell_order_id, 'SELL')
+                # 优化统计数据更新 - 延迟批量处理减少API调用
+                # 将订单ID标记为已成交，在策略结束时批量更新统计
+                self.completed_order_ids.extend([buy_order_id, sell_order_id])
+                self.log("📊 订单统计将在轮次结束时批量更新")
                 
-                # 买卖都成交，从跟踪列表中移除这些订单
+                # 从跟踪列表移除
                 if buy_order_id in self.pending_orders:
                     self.pending_orders.remove(buy_order_id)
                 if sell_order_id in self.pending_orders:
                     self.pending_orders.remove(sell_order_id)
-                # 买卖都成交，理论上余额平衡，无需检查
+                
+                # 标记轮次完成
                 round_completed = True
                 self.completed_rounds += 1
-                self.log(f"✅ 第 {round_num} 轮交易完成")
-                self.log(f"第 {round_num} 轮交易双向成交完成", 'info')
-                # 更新成功统计 - 方案3优化
-                self._update_success_stats(True)
+                self.log(f"✅ 第 {round_num} 轮交易完成 (优化策略成功)")
                 return True
                 
-            elif sell_filled and (not buy_filled or buy_partially):
-                # 卖出完全成交，买入未成交或部分成交
-                # 先统计已成交的卖单
-                self._update_filled_order_statistics(sell_order_id, 'SELL')
+            elif sell_filled and not buy_filled:
+                # 只有卖单成交，执行买入补单
+                self.log("📈 卖单成交，买单未成交 - 执行买入补单")
+                # 延迟统计更新
+                self.completed_order_ids.append(sell_order_id)
                 
-                if buy_partially:
-                    self.log(f"❌ 卖出已成交，买入部分成交 ({buy_executed}/{buy_original}) - 取消买单，补足剩余数量", "error")
-                    remaining_buy = buy_original - buy_executed
-                else:
-                    self.log(f"❌ 卖出已成交，买入未成交 - 先取消未成交买单，再市价买入补回", "error")
-                    remaining_buy = buy_original
+                # 取消买单
+                self.cancel_order(buy_order_id)
                 
-                # 1. 取消未成交或部分成交的买入订单
-                self.log(f"取消买入订单: {buy_order_id}")
-                cancel_success = self.cancel_order(buy_order_id)
-                if cancel_success:
-                    self.log("✅ 买入订单取消成功")
-                else:
-                    self.log(f"⚠️ 买入订单取消失败，可能已成交或已取消", "warning")
-                
-                # 从跟踪列表中移除订单（无论取消是否成功）
+                # 移除订单
                 if sell_order_id in self.pending_orders:
-                    self.pending_orders.remove(sell_order_id)  # 卖出已成交
+                    self.pending_orders.remove(sell_order_id)
                 if buy_order_id in self.pending_orders:
-                    self.pending_orders.remove(buy_order_id)   # 买入已取消或将被取消
+                    self.pending_orders.remove(buy_order_id)
                 
-                # 2. 等待一下确保取消生效
+                # 市价买入补单
                 time.sleep(0.5)
-                
-                # 3. 执行市价买入补单 - 精确补足剩余数量
-                self.log(f"需要补买: {remaining_buy:.2f}")
-                success = self.smart_buy_order(trade_price, remaining_buy)
-                if not success:
-                    self.log(f"❌ 市价买入补单失败", "error")
+                success = self.place_market_buy_order(actual_quantity)
+                if success:
+                    self.log("✅ 买入补单成功")
+                    self.completed_rounds += 1
+                    return True
+                else:
+                    self.log("❌ 买入补单失败", 'error')
                     return False
-                self.log("✅ 买入补单完成，数量已平衡")
-                # 统计完成的轮次
-                round_completed = True
-                self.completed_rounds += 1
-                self.log(f"✅ 第 {round_num} 轮交易完成")
-                self.log(f"第 {round_num} 轮交易通过买入补单完成", 'info')
-                return True
+                    
+            elif buy_filled and not sell_filled:
+                # 只有买单成交，执行卖出补单
+                self.log("📉 买单成交，卖单未成交 - 执行卖出补单")
+                # 延迟统计更新
+                self.completed_order_ids.append(buy_order_id)
                 
-            elif buy_filled and (not sell_filled or sell_partially):
-                # 买入完全成交，卖出未成交或部分成交
-                # 先统计已成交的买单
-                self._update_filled_order_statistics(buy_order_id, 'BUY')
+                # 取消卖单
+                self.cancel_order(sell_order_id)
                 
-                if sell_partially:
-                    self.log(f"❌ 买入已成交，卖出部分成交 ({sell_executed}/{sell_original}) - 取消卖单，补足剩余数量", "error")
-                    remaining_sell = sell_original - sell_executed
-                else:
-                    self.log(f"❌ 买入已成交，卖出未成交 - 先取消未成交卖单，再市价卖出处理", "error")
-                    remaining_sell = sell_original
-                
-                # 1. 取消未成交或部分成交的卖出订单
-                self.log(f"取消卖出订单: {sell_order_id}")
-                cancel_success = self.cancel_order(sell_order_id)
-                if cancel_success:
-                    self.log("✅ 卖出订单取消成功")
-                else:
-                    self.log(f"⚠️ 卖出订单取消失败，可能已成交或已取消", "warning")
-                
-                # 从跟踪列表中移除订单（无论取消是否成功）
-                if buy_order_id in self.pending_orders:
-                    self.pending_orders.remove(buy_order_id)   # 买入已成交
+                # 移除订单
                 if sell_order_id in self.pending_orders:
-                    self.pending_orders.remove(sell_order_id)  # 卖出已取消或将被取消
+                    self.pending_orders.remove(sell_order_id)
+                if buy_order_id in self.pending_orders:
+                    self.pending_orders.remove(buy_order_id)
                 
-                # 2. 等待一下确保取消生效
+                # 市价卖出补单
                 time.sleep(0.5)
-                
-                # 3. 执行市价卖出补单 - 精确补足剩余数量
-                self.log(f"需要补卖: {remaining_sell:.2f}")
-                success = self.smart_sell_order(trade_price, remaining_sell)
-                if not success:
-                    self.log(f"❌ 市价卖出补单失败", "error")
+                success = self.place_market_sell_order(actual_quantity)
+                if success:
+                    self.log("✅ 卖出补单成功")
+                    self.completed_rounds += 1
+                    return True
+                else:
+                    self.log("❌ 卖出补单失败", 'error')
                     return False
-                self.log("✅ 卖出补单完成，数量已平衡")
-                # 统计完成的轮次
-                round_completed = True
-                self.completed_rounds += 1
-                self.log(f"✅ 第 {round_num} 轮交易完成")
-                self.log(f"第 {round_num} 轮交易通过卖出补单完成", 'info')
-                return True
-                
-            elif buy_partially and sell_partially:
-                # 都是部分成交的情况
-                self.log(f"⚠️ 买卖都部分成交 - 买入: {buy_executed}/{buy_original}, 卖出: {sell_executed}/{sell_original}", "warning")
-                
-                # 统计已成交的部分
-                self._update_filled_order_statistics(buy_order_id, 'BUY')
-                self._update_filled_order_statistics(sell_order_id, 'SELL')
-                
-                remaining_buy = buy_original - buy_executed
-                remaining_sell = sell_original - sell_executed
-                
-                # 取消两个部分成交的订单
-                self.log("取消两个部分成交的订单...")
+            
+            else:
+                # 都未成交，取消订单
+                self.log("⚠️ 双向订单都未成交，取消订单")
                 self.cancel_order(buy_order_id)
                 self.cancel_order(sell_order_id)
-                time.sleep(0.5)
                 
-                # 补足剩余数量
-                if remaining_buy > 0:
-                    self.log(f"补买剩余数量: {remaining_buy:.2f}")
-                    self.smart_buy_order(trade_price, remaining_buy)
+                # 移除订单
+                if sell_order_id in self.pending_orders:
+                    self.pending_orders.remove(sell_order_id)
+                if buy_order_id in self.pending_orders:
+                    self.pending_orders.remove(buy_order_id)
                 
-                if remaining_sell > 0:
-                    self.log(f"补卖剩余数量: {remaining_sell:.2f}")
-                    self.smart_sell_order(trade_price, remaining_sell)
-                
-                self.log("✅ 部分成交补单完成")
-                # 统计完成的轮次
-                round_completed = True
-                self.completed_rounds += 1
-                self.log(f"✅ 第 {round_num} 轮交易完成")
-                self.log(f"第 {round_num} 轮交易通过部分成交补单完成", 'info')
-                return True
-                
-            else:
-                self.log(f"❌ 买卖订单都未成交或无法获取订单状态", "error")
-                
-                # 如果无法获取订单状态，通过余额对比判断实际情况
-                if buy_status is None or sell_status is None:
-                    self.log(f"⚠️ 无法获取订单状态，使用余额对比判断", "warning")
-                    current_balance = self.get_asset_balance()
-                    balance_change = current_balance - initial_balance
-                    
-                    self.log(f"余额变化: {balance_change:.2f}")
-                    
-                    if abs(balance_change) <= 0.1:
-                        self.log("💡 余额无显著变化，可能订单都未成交")
-                        # 取消所有订单
-                        self.cancel_order(buy_order_id)
-                        self.cancel_order(sell_order_id)
-                        self.log("ℹ️ 已尝试取消所有订单，本轮结束")
-                        return False
-                    elif balance_change > 0.1:
-                        self.log("💡 余额增加，可能有买入成交，执行卖出补单")
-                        success = self.smart_sell_order(trade_price, abs(balance_change))
-                        if success:
-                            round_completed = True
-                            self.completed_rounds += 1
-                            self.log(f"✅ 第 {round_num} 轮交易完成")
-                            self.log(f"第 {round_num} 轮交易通过余额判断卖出补单完成", 'info')
-                        return success
-                    elif balance_change < -0.1:
-                        self.log("💡 余额减少，可能有卖出成交，执行买入补单")
-                        success = self.smart_buy_order(trade_price, abs(balance_change))
-                        if success:
-                            round_completed = True
-                            self.completed_rounds += 1
-                            self.log(f"✅ 第 {round_num} 轮交易完成")
-                            self.log(f"第 {round_num} 轮交易通过余额判断买入补单完成", 'info')
-                        return success
-                else:
-                    # 正常情况：都未成交，取消订单释放资金，跳到下一轮
-                    self.log(f"❌ 买卖订单都未成交，取消订单释放资金", "error")
-                    
-                    # 取消所有未成交订单
-                    buy_cancelled = self.cancel_order(buy_order_id)
-                    sell_cancelled = self.cancel_order(sell_order_id)
-                    
-                    if buy_cancelled:
-                        self.log("✅ 买入订单取消成功")
-                    else:
-                        self.log(f"⚠️ 取消买入订单失败", "warning")
-                        
-                    if sell_cancelled:
-                        self.log("✅ 卖出订单取消成功") 
-                    else:
-                        self.log(f"⚠️ 取消卖出订单失败", "warning")
-                    
-                    # 从跟踪列表中移除这些订单（无论取消是否成功）
-                    if buy_order_id in self.pending_orders:
-                        self.pending_orders.remove(buy_order_id)
-                    if sell_order_id in self.pending_orders:
-                        self.pending_orders.remove(sell_order_id)
-                    
-                    time.sleep(1)  # 等待取消生效
-                    self.log("ℹ️ 所有订单已取消，资金已释放，进入下一轮")
-                    return False
-                
-            # 这里不应该到达，但如果到达了就标记为完成
-            if not round_completed:
-                round_completed = True
-                self.completed_rounds += 1
-                self.log(f"✅ 第 {round_num} 轮交易完成")
-                self.log(f"第 {round_num} 轮交易成功完成", 'info')
-            return True
+                return False
             
         except Exception as e:
             self.log(f"交易轮次错误: {e}")
@@ -2554,6 +2203,10 @@ class VolumeStrategy:
                             self.log(f"🛑 等待期间收到停止请求，立即结束")
                             break
                         time.sleep(1)
+            
+            # API优化：批量更新延迟的统计数据
+            self.log(f"\n=== 批量更新交易统计 ===")
+            self._batch_update_statistics()
             
             # 执行最终余额校验和补单
             self.log(f"\n=== 执行最终余额校验 ===")
