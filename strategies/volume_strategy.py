@@ -64,6 +64,7 @@ class VolumeStrategy:
         self.original_balance = 0.0  # 真正的原始余额（用于最终恢复）
         self.initial_balance = 0.0   # 策略开始时的初始余额（用于循环期间的平衡检验）
         self.completed_rounds = 0    # 完成的轮次
+        self.failed_rounds = 0       # 失败的轮次
         self.supplement_orders = 0   # 补单次数
         self.total_cost_diff = 0.0   # 总损耗（价格差累计）
         self.auto_purchased = 0.0    # 自动购买的数量（需要最终卖出）
@@ -2018,21 +2019,26 @@ class VolumeStrategy:
         # 智能余额检查：先清理订单释放资金，再获取真实可用余额
         available_balance = self.smart_balance_check()
         
-        # 检查余额是否足够本轮交易
+        # 检查余额是否足够本轮交易（增加安全边际）
         required_quantity = float(self.quantity)
-        if available_balance < required_quantity:
-            self.log(f"⚠️ 可用余额不足: {available_balance:.2f} < {required_quantity:.2f}", "warning")
+        safety_margin = 0.2  # 安全边际：保留0.2个币
+        
+        if available_balance < required_quantity + safety_margin:
+            self.log(f"⚠️ 可用余额不足（含安全边际）: {available_balance:.2f} < {required_quantity:.2f} + {safety_margin:.1f}", "warning")
             
-            # 如果差异较小（1个以内），调整交易数量
-            if available_balance > 0 and required_quantity - available_balance <= 1.0:
-                self.log(f"💡 调整交易数量为可用余额: {available_balance:.2f}")
-                actual_quantity = available_balance
+            # 计算安全的交易数量
+            safe_quantity = available_balance - safety_margin
+            
+            if safe_quantity > 0 and safe_quantity >= required_quantity * 0.95:  # 至少保证95%的目标数量
+                self.log(f"💡 调整交易数量为安全数量: {safe_quantity:.2f}")
+                actual_quantity = safe_quantity
             else:
-                self.log(f"❌ 余额不足且差异过大，跳过本轮", "error")
+                self.log(f"❌ 即使调整后数量仍不足，跳过本轮", "error")
                 return False
         else:
-            actual_quantity = required_quantity
-            self.log(f"✅ 余额充足: {available_balance:.2f} >= {required_quantity:.2f}")
+            # 即使余额充足，也使用安全数量避免精度问题
+            actual_quantity = available_balance - safety_margin
+            self.log(f"✅ 余额充足，使用安全数量: {actual_quantity:.2f} (原{required_quantity:.2f})")
         
         # 初始化本轮状态
         round_completed = False
@@ -2523,6 +2529,7 @@ class VolumeStrategy:
                     success_rounds += 1
                 else:
                     self.log(f"第 {round_num} 轮失败")
+                    self.failed_rounds += 1
                 
                 # 检查是否收到停止请求（轮次完成后）
                 if self.is_stop_requested():
@@ -2552,8 +2559,15 @@ class VolumeStrategy:
             self.net_loss_usdt = self.usdt_balance_diff - self.total_fees_usdt
             
             self.log(f"\n=== 策略执行完成 ===")
+            # 计算实际执行的轮次
+            total_executed = self.completed_rounds + self.failed_rounds
             self.log(f"完成轮次: {self.completed_rounds}/{self.rounds}")
-            self.log(f"成功率: {(self.completed_rounds/self.rounds*100):.1f}%")
+            self.log(f"失败轮次: {self.failed_rounds}")
+            self.log(f"实际执行: {total_executed}/{self.rounds}")
+            if total_executed > 0:
+                self.log(f"成功率: {(self.completed_rounds/total_executed*100):.1f}%")
+            else:
+                self.log(f"成功率: 0.0%")
             self.log(f"补单次数: {self.supplement_orders}")
             self.log(f"估算损耗: {self.total_cost_diff:.4f} USDT")
             

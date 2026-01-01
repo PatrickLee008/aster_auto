@@ -366,10 +366,13 @@ class TaskRunner:
                         usdt_balance_diff = getattr(strategy_instance, 'usdt_balance_diff', 0)
                         net_loss_usdt = getattr(strategy_instance, 'net_loss_usdt', 0)
                         
+                        # 获取失败轮次统计
+                        failed_rounds = getattr(strategy_instance, 'failed_rounds', 0)
+                        
                         self.update_task_stats(
                             total_rounds=total_rounds,
-                            successful_rounds=total_rounds,  # 完成的轮次都算成功
-                            failed_rounds=0,
+                            successful_rounds=total_rounds,  # completed_rounds就是成功轮次
+                            failed_rounds=failed_rounds,
                             supplement_orders=supplement_orders,
                             total_cost_diff=total_cost_diff,
                             buy_volume_usdt=buy_volume_usdt,
