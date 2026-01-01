@@ -118,12 +118,8 @@
                                         
                                         <br>手续费: <span class="text-warning">{{ task.total_fees_usdt or 0 }} USDT</span>
                                         
-                                        {% if task.usdt_balance_diff %}
-                                        <br>USDT差值: <span class="{{ 'text-success' if task.usdt_balance_diff > 0 else 'text-danger' }}">{{ task.usdt_balance_diff }} USDT</span>
-                                        {% endif %}
-                                        
-                                        {% if task.net_loss_usdt %}
-                                        <br>净损耗: <span class="{{ 'text-success' if task.net_loss_usdt > 0 else 'text-danger' }}">{{ task.net_loss_usdt }} USDT</span>
+                                        {% if task.usdt_balance_diff is not none %}
+                                        <br>磨损（含手续费）: <span class="{{ 'text-success' if task.usdt_balance_diff >= 0 else 'text-danger' }}">{{ task.usdt_balance_diff }} USDT</span>
                                         {% endif %}
                                         
                                         {% if task.total_cost_diff > 0 %}
