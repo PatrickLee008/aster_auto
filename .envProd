@@ -37,7 +37,7 @@ PROXY_TYPE=socks5
 # 🌐 Smartproxy配置 (开发环境)
 # ===========================================
 # 为每个任务分配独立美国IP - 粘性会话(60分钟)
-SMARTPROXY_ENABLED=True
+SMARTPROXY_ENABLED=False
 SMARTPROXY_BASE_USERNAME=user-sp9y3nhxbw-sessionduration-60
 SMARTPROXY_PASSWORD=ez8m5F~gl6jG9snvPU
 SMARTPROXY_RESIDENTIAL_HOST=gate.decodo.com
