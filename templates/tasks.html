@@ -122,9 +122,6 @@
                                         <br>磨损（含手续费）: <span class="{{ 'text-success' if task.usdt_balance_diff >= 0 else 'text-danger' }}">{{ task.usdt_balance_diff }} USDT</span>
                                         {% endif %}
                                         
-                                        {% if task.total_cost_diff > 0 %}
-                                        <br>估算损耗: <span class="text-danger">{{ "%.4f"|format(task.total_cost_diff) }} USDT</span>
-                                        {% endif %}
                                         
                                     </div>
                                 </td>
