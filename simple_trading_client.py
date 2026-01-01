@@ -344,7 +344,7 @@ class SimpleTradingClient:
             params['signature'] = signature
             
             response = requests.get(
-                f"{self.host}/api/v3/allOrders",
+                f"{self.host}/api/v1/allOrders",
                 params=params,
                 headers={
                     'X-MBX-APIKEY': self.api_key,
@@ -355,6 +355,11 @@ class SimpleTradingClient:
             )
             
             if response.status_code == 200:
+                # 检查是否返回HTML错误页面
+                content_type = response.headers.get('content-type', '')
+                if 'html' in content_type.lower() or '<!DOCTYPE html>' in response.text:
+                    print(f"批量查询订单失败: API返回HTML错误页面，端点可能不正确")
+                    return None
                 return response.json()
             else:
                 print(f"批量查询订单失败: {response.text}")
@@ -393,7 +398,7 @@ class SimpleTradingClient:
             params['signature'] = signature
             
             response = requests.delete(
-                f"{self.host}/api/v3/openOrders",
+                f"{self.host}/api/v1/allOpenOrders",
                 params=params,
                 headers={
                     'X-MBX-APIKEY': self.api_key,
@@ -404,9 +409,23 @@ class SimpleTradingClient:
             )
             
             if response.status_code == 200:
+                # 检查是否返回HTML错误页面
+                content_type = response.headers.get('content-type', '')
+                if 'html' in content_type.lower() or '<!DOCTYPE html>' in response.text:
+                    print(f"批量取消失败: API返回HTML错误页面，端点可能不正确")
+                    return None
+                    
                 result = response.json()
-                print(f"批量取消成功，取消了 {len(result)} 个订单")
-                return result
+                # 根据API文档，成功响应可能是简单的成功消息
+                if isinstance(result, dict) and result.get('code') == 200:
+                    print(f"批量取消成功: {result.get('msg', '操作完成')}")
+                    return []  # 返回空列表表示成功
+                elif isinstance(result, list):
+                    print(f"批量取消成功，取消了 {len(result)} 个订单")
+                    return result
+                else:
+                    print(f"批量取消成功")
+                    return []
             else:
                 print(f"批量取消失败: {response.text}")
                 return None
