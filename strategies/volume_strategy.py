@@ -5,6 +5,7 @@
 
 import time
 import random
+import signal
 from typing import Optional, Dict, Any
 import sys
 import os
@@ -92,12 +93,37 @@ class VolumeStrategy:
         # 防重复统计的已处理订单集合
         self.processed_orders = set()
         
+        # 优雅停止标志
+        self.stop_requested = False
+        self.setup_signal_handlers()
+        
         self.log(f"=== 刷量策略初始化 ===")
         self.log(f"交易对: {symbol}, 数量: {quantity}, 间隔: {interval}秒, 轮次: {rounds}次")
     
     def set_logger(self, logger):
         """设置日志记录器"""
         self.logger = logger
+
+    def setup_signal_handlers(self):
+        """设置信号处理器"""
+        def signal_handler(signum, frame):
+            self.log(f"\n🛑 收到停止信号 {signum}，开始优雅停止...")
+            self.stop_requested = True
+            
+        # 监听常见的停止信号
+        signal.signal(signal.SIGINT, signal_handler)    # Ctrl+C
+        signal.signal(signal.SIGTERM, signal_handler)   # 终止信号
+        if hasattr(signal, 'SIGBREAK'):  # Windows
+            signal.signal(signal.SIGBREAK, signal_handler)
+
+    def is_stop_requested(self) -> bool:
+        """检查是否收到停止请求"""
+        return self.stop_requested
+
+    def request_stop(self):
+        """外部请求停止"""
+        self.log("📢 外部请求停止策略...")
+        self.stop_requested = True
     
     def log(self, message, level='info'):
         """记录日志"""
@@ -503,11 +529,6 @@ class VolumeStrategy:
             # 降级到单个查询
             return self._fallback_single_order_query(order_ids)
         
-        # 检查客户端是否支持批量查询
-        if not hasattr(self.client, 'get_orders'):
-            self.log(f"⚠️ 客户端不支持批量查询，降级到单个查询")
-            self.batch_query_enabled = False  # 禁用批量查询避免重复错误
-            return self._fallback_single_order_query(order_ids)
             
         try:
             self.log(f"📊 批量查询 {len(order_ids)} 个订单状态")
@@ -700,10 +721,6 @@ class VolumeStrategy:
     
     def cancel_all_open_orders_batch(self) -> tuple:
         """批量取消未成交订单 - 方案3优化"""
-        # 检查客户端是否支持批量取消
-        if not hasattr(self.client, 'cancel_open_orders'):
-            self.log(f"⚠️ 客户端不支持批量取消，使用原有逻辑")
-            return 0.0, 0.0  # 返回空结果，让原有逻辑处理
             
         try:
             self.log("🔍 批量处理未成交订单...")
@@ -2447,15 +2464,30 @@ class VolumeStrategy:
         
         try:
             for round_num in range(1, self.rounds + 1):
+                # 检查是否收到停止请求
+                if self.is_stop_requested():
+                    self.log(f"🛑 收到停止请求，在第 {round_num} 轮前提前结束")
+                    break
+                
                 if self.execute_round(round_num):
                     success_rounds += 1
                 else:
                     self.log(f"第 {round_num} 轮失败")
                 
+                # 检查是否收到停止请求（轮次完成后）
+                if self.is_stop_requested():
+                    self.log(f"🛑 收到停止请求，在第 {round_num} 轮后提前结束")
+                    break
+                
                 # 等待间隔时间(除了最后一轮)
                 if round_num < self.rounds:
                     self.log(f"等待 {self.interval} 秒...")
-                    time.sleep(self.interval)
+                    # 分段睡眠，以便快速响应停止请求
+                    for _ in range(self.interval):
+                        if self.is_stop_requested():
+                            self.log(f"🛑 等待期间收到停止请求，立即结束")
+                            break
+                        time.sleep(1)
             
             # 执行最终余额校验和补单
             self.log(f"\n=== 执行最终余额校验 ===")
@@ -2504,6 +2536,11 @@ class VolumeStrategy:
             self.log(f"与执行基准差异: {execution_change:+.2f}")
             self.log(f"余额校验: {'✅ 通过' if final_success else '⚠️ 存在差异'}")
             self.log(f"现货清仓: {'✅ 成功' if sellout_success else '⚠️ 未完全清仓'}")
+            
+            # 如果是因为停止请求而结束，也执行清理
+            if self.is_stop_requested():
+                self.log("\n🛑 策略因停止请求结束")
+                self._cleanup_on_stop()
             
             return self.completed_rounds > 0
             

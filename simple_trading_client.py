@@ -314,6 +314,107 @@ class SimpleTradingClient:
             print(f"查询订单错误: {e}")
             return None
     
+    def get_orders(self, symbol: str, limit: int = 500) -> Optional[list]:
+        """批量查询订单历史 - 用于批量状态检查"""
+        try:
+            server_time = self.get_server_time()
+            
+            params = {
+                'symbol': symbol,
+                'limit': limit,
+                'timestamp': server_time,
+                'recvWindow': 60000
+            }
+            
+            # 生成查询字符串
+            query_parts = []
+            for key in ['symbol', 'limit', 'timestamp', 'recvWindow']:
+                if key in params:
+                    query_parts.append(f"{key}={params[key]}")
+            
+            query_string = "&".join(query_parts)
+            
+            # 生成签名
+            signature = hmac.new(
+                self.secret_key.encode('utf-8'),
+                query_string.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+            
+            params['signature'] = signature
+            
+            response = requests.get(
+                f"{self.host}/api/v3/allOrders",
+                params=params,
+                headers={
+                    'X-MBX-APIKEY': self.api_key,
+                    'User-Agent': 'PythonApp/1.0'
+                },
+                proxies=self.proxies,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"批量查询订单失败: {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"批量查询错误: {e}")
+            return None
+    
+    def cancel_open_orders(self, symbol: str) -> Optional[list]:
+        """批量取消未成交订单"""
+        try:
+            server_time = self.get_server_time()
+            
+            params = {
+                'symbol': symbol,
+                'timestamp': server_time,
+                'recvWindow': 60000
+            }
+            
+            # 生成查询字符串
+            query_parts = []
+            for key in ['symbol', 'timestamp', 'recvWindow']:
+                if key in params:
+                    query_parts.append(f"{key}={params[key]}")
+            
+            query_string = "&".join(query_parts)
+            
+            # 生成签名
+            signature = hmac.new(
+                self.secret_key.encode('utf-8'),
+                query_string.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+            
+            params['signature'] = signature
+            
+            response = requests.delete(
+                f"{self.host}/api/v3/openOrders",
+                params=params,
+                headers={
+                    'X-MBX-APIKEY': self.api_key,
+                    'User-Agent': 'PythonApp/1.0'
+                },
+                proxies=self.proxies,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                print(f"批量取消成功，取消了 {len(result)} 个订单")
+                return result
+            else:
+                print(f"批量取消失败: {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"批量取消错误: {e}")
+            return None
+    
     def get_exchange_info(self, symbol: str = None) -> Optional[Dict[str, Any]]:
         """获取交易所信息，包括交易对的精度要求"""
         try:
