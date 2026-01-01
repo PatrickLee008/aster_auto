@@ -126,9 +126,6 @@
                                         <br>估算损耗: <span class="text-danger">{{ "%.4f"|format(task.total_cost_diff) }} USDT</span>
                                         {% endif %}
                                         
-                                        {% if task.successful_rounds > 0 and task.rounds > 0 %}
-                                        <br>完成率: {{ "%.1f"|format((task.successful_rounds / task.rounds) * 100) }}%
-                                        {% endif %}
                                     </div>
                                 </td>
                                 <td>
@@ -967,10 +964,6 @@ function updateTaskProgressDisplay(task) {
             statsHtml += `<br>净损益: <span class="${profitClass}">${task.net_profit > 0 ? '+' : ''}${task.net_profit.toFixed(4)} USDT</span>`;
         }
         
-        // 添加完成率
-        if (task.total_rounds > 0) {
-            statsHtml += `<br>完成率: ${task.percentage.toFixed(1)}%`;
-        }
         
         // 添加最后更新时间
         if (task.last_update) {
