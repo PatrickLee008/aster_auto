@@ -41,6 +41,24 @@ class VolumeStrategy:
         self.order_check_timeout = 2.0  # 订单成交检查时间(改为2秒，给买卖订单更多成交时间)
         self.max_price_deviation = 0.01  # 最大价格偏差(1%)
         
+        # API优化参数 - 方案3智能优化
+        self.batch_query_enabled = True  # 启用批量查询
+        self.cache_enabled = True  # 启用缓存
+        self.orderbook_cache_time = 3.0  # 订单簿缓存时间(秒)
+        self.balance_cache_time = 5.0  # 余额缓存时间(秒)
+        self.smart_skip_enabled = True  # 启用智能跳过
+        
+        # 缓存存储
+        self.cached_orderbook = None
+        self.cached_balance = None
+        self.last_orderbook_time = 0
+        self.last_balance_time = 0
+        
+        # 智能预判状态
+        self.consecutive_success = 0  # 连续成功次数
+        self.recent_api_errors = 0  # 最近API错误次数
+        self.last_error_time = 0  # 上次错误时间
+        
         # 统计数据
         self.original_balance = 0.0  # 真正的原始余额（用于最终恢复）
         self.initial_balance = 0.0   # 策略开始时的初始余额（用于循环期间的平衡检验）
@@ -292,8 +310,18 @@ class VolumeStrategy:
             self.log(f"连接错误: {e}")
             return False
     
-    def get_order_book(self) -> Optional[Dict[str, Any]]:
-        """获取深度订单薄数据"""
+    def get_order_book(self, use_cache: bool = None) -> Optional[Dict[str, Any]]:
+        """获取深度订单薄数据 - 支持缓存"""
+        # 默认启用缓存
+        if use_cache is None:
+            use_cache = self.cache_enabled
+            
+        # 检查缓存
+        current_time = time.time()
+        if (use_cache and self.cached_orderbook and 
+            current_time - self.last_orderbook_time < self.orderbook_cache_time):
+            return self.cached_orderbook
+            
         try:
             # 尝试获取深度数据
             depth_response = self.client.get_depth(self.symbol, 5)
@@ -314,12 +342,19 @@ class VolumeStrategy:
                     
                     # 价格区间信息已获取
                     
-                    return {
+                    result = {
                         'bid_price': first_bid_price,  # 买方第一档（买一价格）
                         'ask_price': first_ask_price,  # 卖方第一档（卖一价格）
                         'bid_depth': len(bids),
                         'ask_depth': len(asks)
                     }
+                    
+                    # 更新缓存
+                    if use_cache:
+                        self.cached_orderbook = result
+                        self.last_orderbook_time = current_time
+                    
+                    return result
             
             # 如果深度数据获取失败，回退到简单模式
             self.log("深度数据获取失败，使用简单买卖一价格")
@@ -462,6 +497,62 @@ class VolumeStrategy:
             self.log(f"买入订单错误: {e}", "error")
             raise Exception(f"买入订单执行异常: {e}")
     
+    def check_multiple_order_status(self, order_ids: list) -> dict:
+        """批量查询订单状态 - 方案3优化"""
+        if not order_ids or not self.batch_query_enabled:
+            # 降级到单个查询
+            return self._fallback_single_order_query(order_ids)
+            
+        try:
+            self.log(f"📊 批量查询 {len(order_ids)} 个订单状态")
+            
+            # 尝试使用批量查询接口
+            orders = self.client.get_orders(
+                symbol=self.symbol,
+                limit=len(order_ids) * 2  # 获取更多订单以确保包含目标订单
+            )
+            
+            # 构建结果字典
+            result = {}
+            target_order_ids = set(str(oid) for oid in order_ids)
+            
+            for order in orders:
+                order_id_str = str(order['orderId'])
+                if order_id_str in target_order_ids:
+                    result[order_id_str] = order['status']
+            
+            # 检查是否所有订单都找到了
+            missing_orders = target_order_ids - set(result.keys())
+            if missing_orders:
+                self.log(f"⚠️ 批量查询中有 {len(missing_orders)} 个订单未找到，降级查询")
+                # 对未找到的订单进行单独查询
+                for missing_id in missing_orders:
+                    try:
+                        status = self.check_order_status(int(missing_id))
+                        result[missing_id] = status
+                    except:
+                        result[missing_id] = 'UNKNOWN'
+            
+            self.log(f"✅ 批量查询完成，获取到 {len(result)} 个订单状态")
+            return result
+            
+        except Exception as e:
+            self.log(f"❌ 批量查询失败: {e}，降级到单个查询")
+            self.recent_api_errors += 1
+            self.last_error_time = time.time()
+            return self._fallback_single_order_query(order_ids)
+    
+    def _fallback_single_order_query(self, order_ids: list) -> dict:
+        """降级到单个订单查询"""
+        result = {}
+        for order_id in order_ids:
+            try:
+                result[str(order_id)] = self.check_order_status(int(order_id))
+            except Exception as e:
+                self.log(f"⚠️ 单个查询订单 {order_id} 失败: {e}")
+                result[str(order_id)] = 'UNKNOWN'
+        return result
+
     def check_order_status(self, order_id: int, max_retries: int = 3) -> Optional[str]:
         """检查订单状态 - 带重试机制"""
         for attempt in range(max_retries):
@@ -601,6 +692,150 @@ class VolumeStrategy:
         
         return False
     
+    def cancel_all_open_orders_batch(self) -> tuple:
+        """批量取消未成交订单 - 方案3优化"""
+        try:
+            self.log("🔍 批量处理未成交订单...")
+            
+            # 获取未成交订单
+            open_orders_result = self.client.get_open_orders(self.symbol)
+            
+            if not open_orders_result:
+                return 0.0, 0.0
+            
+            # 处理不同的响应格式
+            if isinstance(open_orders_result, list):
+                open_orders = open_orders_result
+            elif isinstance(open_orders_result, dict) and 'orders' in open_orders_result:
+                open_orders = open_orders_result['orders']
+            else:
+                open_orders = []
+            
+            if not open_orders:
+                return 0.0, 0.0
+            
+            self.log(f"⚠️ 发现 {len(open_orders)} 个未成交订单")
+            
+            # 统计数量
+            canceled_buy_qty = 0.0
+            canceled_sell_qty = 0.0
+            
+            # 尝试批量取消
+            if self.batch_query_enabled and len(open_orders) > 1:
+                try:
+                    # 提取订单ID列表
+                    order_ids = [order['orderId'] for order in open_orders]
+                    
+                    # 批量取消 (币安支持这个接口)
+                    self.client.cancel_open_orders(symbol=self.symbol)
+                    
+                    self.log(f"✅ 批量取消 {len(order_ids)} 个订单成功")
+                    
+                    # 统计取消的数量
+                    for order in open_orders:
+                        orig_qty = float(order.get('origQty', 0))
+                        if order['side'] == 'BUY':
+                            canceled_buy_qty += orig_qty
+                        else:
+                            canceled_sell_qty += orig_qty
+                    
+                    return canceled_buy_qty, canceled_sell_qty
+                    
+                except Exception as e:
+                    self.log(f"❌ 批量取消失败: {e}，降级到单个取消")
+                    self.recent_api_errors += 1
+            
+            # 降级到单个取消
+            return self._fallback_single_cancel(open_orders)
+            
+        except Exception as e:
+            self.log(f"❌ 批量处理未成交订单异常: {e}", "error")
+            return 0.0, 0.0
+    
+    def _fallback_single_cancel(self, open_orders: list) -> tuple:
+        """降级到单个订单取消"""
+        canceled_buy_qty = 0.0
+        canceled_sell_qty = 0.0
+        
+        for order in open_orders:
+            try:
+                order_id = order['orderId']
+                orig_qty = float(order.get('origQty', 0))
+                
+                if self.cancel_order(order_id):
+                    if order['side'] == 'BUY':
+                        canceled_buy_qty += orig_qty
+                    else:
+                        canceled_sell_qty += orig_qty
+                        
+            except Exception as e:
+                self.log(f"⚠️ 取消订单 {order.get('orderId')} 失败: {e}")
+        
+        return canceled_buy_qty, canceled_sell_qty
+    
+    def _should_skip_order_check(self, round_num: int) -> bool:
+        """智能预判是否可以跳过未成交订单检查"""
+        if not self.smart_skip_enabled:
+            return False
+        
+        # 如果最近有API错误，不跳过
+        if self.recent_api_errors > 0 and time.time() - self.last_error_time < 30:
+            return False
+        
+        # 第1轮不跳过
+        if round_num == 1:
+            return False
+        
+        # 连续成功次数越多，跳过概率越高
+        if self.consecutive_success >= 10:
+            # 10轮后每5轮检查一次
+            return round_num % 5 != 1
+        elif self.consecutive_success >= 5:
+            # 5轮后每3轮检查一次  
+            return round_num % 3 != 1
+        else:
+            # 前5轮每轮都检查
+            return False
+    
+    def _update_success_stats(self, success: bool):
+        """更新成功统计"""
+        if success:
+            self.consecutive_success += 1
+            # 成功时减少错误计数
+            if self.recent_api_errors > 0:
+                self.recent_api_errors = max(0, self.recent_api_errors - 1)
+        else:
+            self.consecutive_success = 0
+    
+    def _auto_adjust_parameters(self):
+        """自适应参数调节 - 方案3优化"""
+        current_time = time.time()
+        
+        # 根据API错误率调整
+        if self.recent_api_errors >= 5:
+            self.log("⚠️ API错误率过高，切换到保守模式")
+            self.batch_query_enabled = False
+            self.cache_enabled = False
+            self.smart_skip_enabled = False
+        elif self.recent_api_errors >= 3:
+            self.log("⚠️ 检测到API错误，部分禁用优化")
+            self.batch_query_enabled = False
+        else:
+            # 错误率正常，可以启用优化
+            if not self.batch_query_enabled and self.consecutive_success >= 3:
+                self.log("✅ 错误率正常，重新启用批量查询")
+                self.batch_query_enabled = True
+        
+        # 根据成功率调整缓存时间
+        if self.consecutive_success >= 20:
+            # 连续成功多次，可以增加缓存时间
+            self.orderbook_cache_time = min(5.0, self.orderbook_cache_time * 1.2)
+            self.balance_cache_time = min(8.0, self.balance_cache_time * 1.2)
+        elif self.consecutive_success < 3:
+            # 成功率低，减少缓存时间
+            self.orderbook_cache_time = max(1.0, self.orderbook_cache_time * 0.8)
+            self.balance_cache_time = max(2.0, self.balance_cache_time * 0.8)
+
     def check_and_cancel_pending_orders(self) -> bool:
         """容错处理：检查并取消上一轮可能遗留的未成交订单"""
         try:
@@ -1705,10 +1940,18 @@ class VolumeStrategy:
         self.log(f"\n=== 第 {round_num}/{self.rounds} 轮交易 ===")
         self.log(f"开始执行第 {round_num} 轮交易", 'info')
         
-        # 容错处理：在每轮开始前检查并清理未成交订单
-        if not self.check_and_cancel_pending_orders():
-            self.log(f"❌ 清理未成交订单失败，跳过本轮", "error")
-            return False
+        # 每10轮执行一次自适应调节 - 方案3优化
+        if round_num % 10 == 1:
+            self._auto_adjust_parameters()
+        
+        # 智能跳过检查 - 方案3优化
+        if self._should_skip_order_check(round_num):
+            self.log(f"🧠 智能跳过未成交订单检查 (轮次 {round_num})")
+        else:
+            # 容错处理：检查并清理未成交订单
+            if not self.check_and_cancel_pending_orders():
+                self.log(f"❌ 清理未成交订单失败，跳过本轮", "error")
+                return False
         
         # 初始化本轮状态
         round_completed = False
@@ -1889,9 +2132,15 @@ class VolumeStrategy:
             # 6. 等待2秒后检查订单成交状态（仅当有有效订单ID时）
             time.sleep(self.order_check_timeout)  # 等待2秒
             
-            # 检查买入和卖出订单状态
-            buy_status = self.check_order_status(buy_order_id)
-            sell_status = self.check_order_status(sell_order_id)
+            # 使用批量查询检查买入和卖出订单状态 - 方案3优化
+            if self.batch_query_enabled and buy_order_id and sell_order_id:
+                order_statuses = self.check_multiple_order_status([buy_order_id, sell_order_id])
+                buy_status = order_statuses.get(str(buy_order_id), 'UNKNOWN')
+                sell_status = order_statuses.get(str(sell_order_id), 'UNKNOWN')
+            else:
+                # 降级到单个查询
+                buy_status = self.check_order_status(buy_order_id)
+                sell_status = self.check_order_status(sell_order_id)
             
             # 强制日志：状态检查完成
             self.log(f"=== 第{round_num}轮: 状态检查完成 买入:{buy_status} 卖出:{sell_status} ===", 'info')
@@ -1945,6 +2194,8 @@ class VolumeStrategy:
                 self.completed_rounds += 1
                 self.log(f"✅ 第 {round_num} 轮交易完成")
                 self.log(f"第 {round_num} 轮交易双向成交完成", 'info')
+                # 更新成功统计 - 方案3优化
+                self._update_success_stats(True)
                 return True
                 
             elif sell_filled and (not buy_filled or buy_partially):
