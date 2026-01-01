@@ -433,10 +433,20 @@ class VolumeStrategy:
             price_range = ask_price - bid_price
             
             if strategy == 'narrow_spread':
-                # 策略1: 窄价差策略 - 在买一和卖一之间靠近中位
-                offset = random.uniform(0.45, 0.55)  # 中位附近，提高双向成交概率
-                base_price = bid_price + (price_range * offset)
-                self.log(f"使用窄价差策略，偏移: {offset:.2f}")
+                # 策略1: 窄价差策略 - 处理极小价差情况
+                if price_range <= 0.000100:  # 价差只有1个tick或更小
+                    # 随机选择买一价或略低于卖一价
+                    if random.choice([True, False]):
+                        base_price = bid_price  # 使用买一价
+                        self.log(f"使用窄价差策略(买一价)，价差: {price_range:.6f}")
+                    else:
+                        base_price = bid_price + 0.000100  # 比买一高一个tick
+                        self.log(f"使用窄价差策略(买一+1tick)，价差: {price_range:.6f}")
+                else:
+                    # 正常价差，使用中位附近
+                    offset = random.uniform(0.45, 0.55)
+                    base_price = bid_price + (price_range * offset)
+                    self.log(f"使用窄价差策略，偏移: {offset:.2f}")
                 
             elif strategy == 'mid_price':
                 # 策略2: 中位价策略 - 完全中位价
@@ -445,9 +455,13 @@ class VolumeStrategy:
                 
             elif strategy == 'adaptive':
                 # 策略3: 自适应策略 - 根据价差大小调整
-                if price_range <= 0.000100:  # 价差极小，使用中位价
-                    base_price = (bid_price + ask_price) / 2
-                    self.log(f"使用自适应策略(中位价)，价差: {price_range:.6f}")
+                if price_range <= 0.000100:  # 价差极小，只有1个tick，随机选择买一或卖一
+                    if random.choice([True, False]):
+                        base_price = bid_price  # 选择买一价
+                        self.log(f"使用自适应策略(买一价)，价差: {price_range:.6f}")
+                    else:
+                        base_price = ask_price - 0.000100  # 选择比卖一低一个tick
+                        self.log(f"使用自适应策略(比卖一低)，价差: {price_range:.6f}")
                 else:
                     offset = random.uniform(0.40, 0.60)  # 中位附近
                     base_price = bid_price + (price_range * offset)
