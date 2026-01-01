@@ -20,8 +20,10 @@ def load_environment():
     env_files = []
     
     if environment == 'production':
+        # 生产环境：基础配置 -> 生产环境配置 -> 本地覆盖
         env_files = ['.env', '.envProd', '.env.local']
     else:
+        # 开发环境：基础配置 -> 本地覆盖
         env_files = ['.env', '.env.local']
     
     loaded_files = []
@@ -32,6 +34,8 @@ def load_environment():
     
     if loaded_files:
         print(f"已加载配置文件: {', '.join(loaded_files)}")
+        print(f"当前环境: {environment}")
+        print(f"最终配置 - SMARTPROXY_ENABLED: {os.getenv('SMARTPROXY_ENABLED', 'undefined')}")
     else:
         print("警告: 未找到任何环境配置文件")
 
