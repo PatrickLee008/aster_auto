@@ -433,26 +433,27 @@ class VolumeStrategy:
             price_range = ask_price - bid_price
             
             if strategy == 'narrow_spread':
-                # 策略1: 窄价差策略 (70%-85%) - 提高自成交概率
-                offset = random.uniform(0.70, 0.85)
+                # 策略1: 窄价差策略 - 在买一和卖一之间靠近中位
+                offset = random.uniform(0.45, 0.55)  # 中位附近，提高双向成交概率
                 base_price = bid_price + (price_range * offset)
                 self.log(f"使用窄价差策略，偏移: {offset:.2f}")
                 
             elif strategy == 'mid_price':
-                # 策略2: 中位价策略 - 平衡风险
+                # 策略2: 中位价策略 - 完全中位价
                 base_price = (bid_price + ask_price) / 2
                 self.log(f"使用中位价策略")
                 
             elif strategy == 'adaptive':
                 # 策略3: 自适应策略 - 根据价差大小调整
-                if price_range <= 0.000200:  # 价差很小
-                    offset = random.uniform(0.80, 0.90)  # 更激进
+                if price_range <= 0.000100:  # 价差极小，使用中位价
+                    base_price = (bid_price + ask_price) / 2
+                    self.log(f"使用自适应策略(中位价)，价差: {price_range:.6f}")
                 else:
-                    offset = random.uniform(0.60, 0.75)  # 更保守
-                base_price = bid_price + (price_range * offset)
-                self.log(f"使用自适应策略，价差: {price_range:.6f}, 偏移: {offset:.2f}")
+                    offset = random.uniform(0.40, 0.60)  # 中位附近
+                    base_price = bid_price + (price_range * offset)
+                    self.log(f"使用自适应策略，价差: {price_range:.6f}, 偏移: {offset:.2f}")
             else:
-                # 默认策略
+                # 默认策略 - 中位附近
                 offset = random.uniform(0.45, 0.55)
                 base_price = bid_price + (price_range * offset)
         
