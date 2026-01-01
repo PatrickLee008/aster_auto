@@ -46,7 +46,7 @@ class VolumeStrategy:
         self.batch_query_enabled = True  # 启用批量查询
         self.cache_enabled = True  # 启用缓存
         self.orderbook_cache_time = 3.0  # 订单簿缓存时间(秒)
-        self.balance_cache_time = 5.0  # 余额缓存时间(秒)
+        self.balance_cache_time = 0.0  # 余额缓存时间(秒) - 禁用！余额必须实时获取
         self.smart_skip_enabled = True  # 启用智能跳过
         
         # 缓存存储
@@ -858,11 +858,13 @@ class VolumeStrategy:
         if self.consecutive_success >= 20:
             # 连续成功多次，可以增加缓存时间
             self.orderbook_cache_time = min(5.0, self.orderbook_cache_time * 1.2)
-            self.balance_cache_time = min(8.0, self.balance_cache_time * 1.2)
+            # 余额缓存始终保持为0，不允许动态调整
+            self.balance_cache_time = 0.0
         elif self.consecutive_success < 3:
             # 成功率低，减少缓存时间
             self.orderbook_cache_time = max(1.0, self.orderbook_cache_time * 0.8)
-            self.balance_cache_time = max(2.0, self.balance_cache_time * 0.8)
+            # 余额缓存始终保持为0，不允许动态调整
+            self.balance_cache_time = 0.0
 
     def check_and_cancel_pending_orders(self) -> bool:
         """容错处理：检查并取消上一轮可能遗留的未成交订单"""
@@ -1021,13 +1023,29 @@ class VolumeStrategy:
             if cancelled_buy_qty > cancelled_sell_qty:
                 shortage = cancelled_buy_qty - cancelled_sell_qty
                 self.log(f"📈 取消买单多于卖单，缺少现货 {shortage:.2f} 个")
-                self.log(f"💡 策略将在后续补货中自动调整")
+                self.log(f"💰 立即执行市价买入补齐现货")
+                
+                # 立即执行市价买入补齐
+                buy_result = self.place_market_buy_order(shortage)
+                if buy_result and buy_result != "ORDER_VALUE_TOO_SMALL":
+                    self.log(f"✅ 市价买入补齐成功: {shortage:.2f} 个")
+                    self.supplement_orders += 1
+                else:
+                    self.log(f"❌ 市价买入补齐失败，可能影响后续交易", "warning")
                 
             # 如果取消的卖单多于买单，说明会多出一些现货，少一些USDT
             elif cancelled_sell_qty > cancelled_buy_qty:
                 excess = cancelled_sell_qty - cancelled_buy_qty
                 self.log(f"📉 取消卖单多于买单，多出现货 {excess:.2f} 个")
-                self.log(f"💡 策略将在后续清仓中自动调整")
+                self.log(f"💰 立即执行市价卖出处理多余现货")
+                
+                # 立即执行市价卖出处理多余现货
+                sell_result = self.place_market_sell_order(excess)
+                if sell_result and sell_result != "ORDER_VALUE_TOO_SMALL":
+                    self.log(f"✅ 市价卖出成功: {excess:.2f} 个")
+                    self.supplement_orders += 1
+                else:
+                    self.log(f"❌ 市价卖出失败，可能影响后续交易", "warning")
                 
         except Exception as e:
             self.log(f"❌ 处理数量不平衡时出错: {e}", "error")
