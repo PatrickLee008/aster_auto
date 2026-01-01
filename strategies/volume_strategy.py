@@ -41,14 +41,6 @@ class VolumeStrategy:
         self.order_check_timeout = 2.0  # 订单成交检查时间(改为2秒，给买卖订单更多成交时间)
         self.max_price_deviation = 0.01  # 最大价格偏差(1%)
         
-        # API调用优化参数
-        self.orderbook_cache_time = 3.0  # 订单簿缓存时间(秒)
-        self.last_orderbook_time = 0
-        self.cached_orderbook = None
-        self.balance_cache_time = 5.0  # 余额缓存时间(秒)  
-        self.last_balance_time = 0
-        self.cached_balance = None
-        
         # 统计数据
         self.original_balance = 0.0  # 真正的原始余额（用于最终恢复）
         self.initial_balance = 0.0   # 策略开始时的初始余额（用于循环期间的平衡检验）
@@ -300,15 +292,9 @@ class VolumeStrategy:
             self.log(f"连接错误: {e}")
             return False
     
-    def get_order_book(self, use_cache=True) -> Optional[Dict[str, Any]]:
+    def get_order_book(self) -> Optional[Dict[str, Any]]:
         """获取深度订单薄数据"""
         try:
-            # 检查缓存
-            current_time = time.time()
-            if (use_cache and self.cached_orderbook and 
-                current_time - self.last_orderbook_time < self.orderbook_cache_time):
-                return self.cached_orderbook
-            
             # 尝试获取深度数据
             depth_response = self.client.get_depth(self.symbol, 5)
             
@@ -328,18 +314,12 @@ class VolumeStrategy:
                     
                     # 价格区间信息已获取
                     
-                    result = {
+                    return {
                         'bid_price': first_bid_price,  # 买方第一档（买一价格）
                         'ask_price': first_ask_price,  # 卖方第一档（卖一价格）
                         'bid_depth': len(bids),
                         'ask_depth': len(asks)
                     }
-                    
-                    # 更新缓存
-                    self.cached_orderbook = result
-                    self.last_orderbook_time = current_time
-                    
-                    return result
             
             # 如果深度数据获取失败，回退到简单模式
             self.log("深度数据获取失败，使用简单买卖一价格")
@@ -348,19 +328,10 @@ class VolumeStrategy:
                 bid_price = float(book_ticker['bidPrice'])  # 买一价格
                 ask_price = float(book_ticker['askPrice'])  # 卖一价格
                 
-                result = {
+                return {
                     'bid_price': bid_price,
-                    'ask_price': ask_price, 
-                    'bid_depth': 1,
-                    'ask_depth': 1
+                    'ask_price': ask_price
                 }
-                
-                # 更新缓存
-                self.cached_orderbook = result
-                self.last_orderbook_time = current_time
-                
-                return result
-            
             return None
             
         except Exception as e:
@@ -548,14 +519,8 @@ class VolumeStrategy:
         
         return None
     
-    def get_asset_balance(self, max_retries: int = 3, use_cache: bool = True) -> float:
+    def get_asset_balance(self, max_retries: int = 3) -> float:
         """获取交易资产的当前余额 - 带重试机制"""
-        # 检查缓存
-        current_time = time.time()
-        if (use_cache and self.cached_balance is not None and 
-            current_time - self.last_balance_time < self.balance_cache_time):
-            return self.cached_balance
-            
         for attempt in range(max_retries):
             try:
                 base_asset = self.symbol.replace('USDT', '')  # 从交易对获取基础资产
@@ -564,15 +529,7 @@ class VolumeStrategy:
                 if account_info and 'balances' in account_info:
                     for balance in account_info['balances']:
                         if balance['asset'] == base_asset:
-                            balance_value = float(balance['free'])
-                            # 更新缓存
-                            self.cached_balance = balance_value
-                            self.last_balance_time = current_time
-                            return balance_value
-                
-                # 余额为0时也缓存
-                self.cached_balance = 0.0
-                self.last_balance_time = current_time
+                            return float(balance['free'])
                 return 0.0
                 
             except Exception as e:
@@ -1748,13 +1705,10 @@ class VolumeStrategy:
         self.log(f"\n=== 第 {round_num}/{self.rounds} 轮交易 ===")
         self.log(f"开始执行第 {round_num} 轮交易", 'info')
         
-        # 容错处理：每3轮检查一次未成交订单以减少API调用
-        if round_num % 3 == 1:  # 第1,4,7...轮检查
-            if not self.check_and_cancel_pending_orders():
-                self.log(f"❌ 清理未成交订单失败，跳过本轮", "error")
-                return False
-        else:
-            self.log(f"🔍 跳过未成交订单检查 (轮次 {round_num})")
+        # 容错处理：在每轮开始前检查并清理未成交订单
+        if not self.check_and_cancel_pending_orders():
+            self.log(f"❌ 清理未成交订单失败，跳过本轮", "error")
+            return False
         
         # 初始化本轮状态
         round_completed = False
@@ -1766,8 +1720,8 @@ class VolumeStrategy:
             # 强制日志：关键检查点
             self.log(f"=== 第{round_num}轮: 开始获取订单薄 ===", 'info')
             
-            # 1. 获取当前订单薄 (使用缓存减少API调用)
-            book_data = self.get_order_book(use_cache=True)
+            # 1. 获取当前订单薄
+            book_data = self.get_order_book()
             if not book_data:
                 self.log("无法获取订单薄，跳过本轮", 'error')
                 return False
