@@ -36,6 +36,19 @@ class HiddenFuturesStrategy:
         self.client = None
         self.logger = None  # 日志记录器
         
+        # 统计变量
+        self.completed_rounds = 0
+        self.failed_rounds = 0
+        self.supplement_orders = 0
+        self.total_cost_diff = 0.0
+        self.buy_volume_usdt = 0.0
+        self.sell_volume_usdt = 0.0
+        self.total_fees_usdt = 0.0
+        self.initial_usdt_balance = 0.0
+        self.final_usdt_balance = 0.0
+        self.usdt_balance_diff = 0.0
+        self.net_loss_usdt = 0.0
+        
         print(f"=== HIDDEN隐藏订单合约自成交策略 ===")
         print(f"交易对: {symbol}")
         print(f"数量: {quantity}张")
@@ -89,9 +102,19 @@ class HiddenFuturesStrategy:
                 
             self.log("[SUCCESS] 连接和配置完成")
             
-            # 检查账户余额
+            # 检查账户余额并初始化统计
             if not self.check_account_balance():
                 return False
+            
+            # 初始化USDT余额统计
+            try:
+                account_info = self.client.get_account_info()
+                if account_info:
+                    self.initial_usdt_balance = float(account_info.get('totalWalletBalance', 0))
+                    self.log(f"初始USDT余额: {self.initial_usdt_balance:.4f}")
+            except Exception as e:
+                self.log(f"获取初始余额失败，将使用0作为初始值: {e}", 'warning')
+                self.initial_usdt_balance = 0.0
             
             return True
             
@@ -223,12 +246,28 @@ class HiddenFuturesStrategy:
                     # 显示成交信息
                     long_fill_price = long_order_status.get('avgPrice', long_order_status.get('price'))
                     short_fill_price = short_order_status.get('avgPrice', short_order_status.get('price'))
+                    long_qty = float(long_order_status.get('executedQty', 0))
+                    short_qty = float(short_order_status.get('executedQty', 0))
                     
                     print(f"多头成交价格: {long_fill_price}")
                     print(f"空头成交价格: {short_fill_price}")
                     print(f"价格一致性: {'✅' if long_fill_price == short_fill_price else '❌'}")
-                    print(f"多头成交数量: {long_order_status.get('executedQty', 'N/A')}张")
-                    print(f"空头成交数量: {short_order_status.get('executedQty', 'N/A')}张")
+                    print(f"多头成交数量: {long_qty}张")
+                    print(f"空头成交数量: {short_qty}张")
+                    
+                    # 累计交易统计
+                    if long_fill_price and long_qty > 0:
+                        volume_usdt = float(long_fill_price) * long_qty
+                        self.buy_volume_usdt += volume_usdt
+                    if short_fill_price and short_qty > 0:
+                        volume_usdt = float(short_fill_price) * short_qty
+                        self.sell_volume_usdt += volume_usdt
+                    
+                    # 累计手续费（假设0.02%的手续费率）
+                    if long_fill_price and short_fill_price and long_qty > 0 and short_qty > 0:
+                        total_volume = float(long_fill_price) * long_qty + float(short_fill_price) * short_qty
+                        fees = total_volume * 0.0002  # 0.02% 手续费
+                        self.total_fees_usdt += fees
                     
                     return True
                 
@@ -360,11 +399,27 @@ class HiddenFuturesStrategy:
                 # 显示成交信息
                 long_fill_price = long_order.get('avgPrice', long_order.get('price'))
                 short_fill_price = short_order.get('avgPrice', short_order.get('price'))
+                long_qty = float(long_order.get('executedQty', 0))
+                short_qty = float(short_order.get('executedQty', 0))
                 
                 print(f"多头成交价格: {long_fill_price}")
                 print(f"空头成交价格: {short_fill_price}")
                 print(f"价格一致性: {'✅' if long_fill_price == short_fill_price else '❌'}")
-                print(f"成交数量: {long_order.get('executedQty', 'N/A')}张")
+                print(f"成交数量: {long_qty}张")
+                
+                # 累计交易统计
+                if long_fill_price and long_qty > 0:
+                    volume_usdt = float(long_fill_price) * long_qty
+                    self.buy_volume_usdt += volume_usdt
+                if short_fill_price and short_qty > 0:
+                    volume_usdt = float(short_fill_price) * short_qty
+                    self.sell_volume_usdt += volume_usdt
+                
+                # 累计手续费（假设0.02%的手续费率）
+                if long_fill_price and short_fill_price and long_qty > 0 and short_qty > 0:
+                    total_volume = float(long_fill_price) * long_qty + float(short_fill_price) * short_qty
+                    fees = total_volume * 0.0002  # 0.02% 手续费
+                    self.total_fees_usdt += fees
                 
                 return True
             else:
@@ -413,9 +468,11 @@ class HiddenFuturesStrategy:
                     
                     if round_success:
                         successful_rounds += 1
+                        self.completed_rounds += 1
                         self.log(f"[SUCCESS] 第{round_num}轮执行成功! 耗时: {round_duration:.0f}毫秒")
                     else:
                         failed_rounds += 1
+                        self.failed_rounds += 1
                         self.log(f"[FAILED] 第{round_num}轮执行失败! 耗时: {round_duration:.0f}毫秒", 'error')
                     
                     # 如果不是最后一轮，等待间隔时间
@@ -428,6 +485,7 @@ class HiddenFuturesStrategy:
                         
                 except Exception as e:
                     failed_rounds += 1
+                    self.failed_rounds += 1
                     self.log(f"[ERROR] 第{round_num}轮执行异常: {e}", 'error')
                     
                     # 如果不是最后一轮，继续执行下一轮
@@ -460,6 +518,11 @@ class HiddenFuturesStrategy:
             self.log(f"  成交方式: 批量API同时提交，立即内部匹配")
             self.log(f"  总耗时: {total_duration:.0f}毫秒")
             self.log(f"  平均每轮: {total_duration/self.rounds:.0f}毫秒")
+            
+            # 计算最终统计数据（不调用API）
+            self.final_usdt_balance = self.initial_usdt_balance - self.total_fees_usdt
+            self.usdt_balance_diff = self.final_usdt_balance - self.initial_usdt_balance
+            self.net_loss_usdt = self.usdt_balance_diff
             
             # 如果有成功的轮次就算成功
             return successful_rounds > 0

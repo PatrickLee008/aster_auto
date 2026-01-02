@@ -403,13 +403,13 @@ class TaskRunner:
                     if total_cost_diff > 0:
                         task.total_cost_diff = Decimal(str(total_cost_diff))
                     
-                    # 更新新的交易量和手续费统计字段 - 使用累加方式
+                    # 更新新的交易量和手续费统计字段 - 直接设置策略累计值
                     if buy_volume_usdt > 0:
-                        task.buy_volume_usdt = (task.buy_volume_usdt or 0) + Decimal(str(buy_volume_usdt))
+                        task.buy_volume_usdt = Decimal(str(buy_volume_usdt))
                     if sell_volume_usdt > 0:
-                        task.sell_volume_usdt = (task.sell_volume_usdt or 0) + Decimal(str(sell_volume_usdt))
+                        task.sell_volume_usdt = Decimal(str(sell_volume_usdt))
                     if total_fees_usdt > 0:
-                        task.total_fees_usdt = (task.total_fees_usdt or 0) + Decimal(str(total_fees_usdt))
+                        task.total_fees_usdt = Decimal(str(total_fees_usdt))
                     
                     # 余额相关的字段使用最新值，不累加
                     if initial_usdt_balance is not None:

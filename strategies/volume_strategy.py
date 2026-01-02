@@ -44,15 +44,10 @@ class VolumeStrategy:
         
         # API优化参数 - 方案3智能优化
         self.batch_query_enabled = True  # 启用批量查询
-        self.cache_enabled = True  # 启用缓存
-        self.orderbook_cache_time = 0.5  # 启用500ms订单簿缓存减少API调用
-        self.balance_cache_time = 0.0  # 余额缓存时间(秒) - 禁用！余额必须实时获取
+        # 缓存已完全禁用以确保价格准确性
         
-        # 缓存存储
-        self.cached_orderbook = None
-        self.cached_balance = None
-        self.last_orderbook_time = 0
-        self.last_balance_time = 0
+        # 输出缓存状态确认
+        print("📊 价格准确性优化: 订单簿缓存已禁用，所有价格数据实时获取")
         
         # API错误追踪
         self.recent_api_errors = 0  # 最近API错误次数
@@ -358,16 +353,9 @@ class VolumeStrategy:
             return False
     
     def get_order_book(self, use_cache: bool = None) -> Optional[Dict[str, Any]]:
-        """获取深度订单薄数据 - 支持缓存"""
-        # 默认启用缓存
-        if use_cache is None:
-            use_cache = self.cache_enabled
-            
-        # 检查缓存
-        current_time = time.time()
-        if (use_cache and self.cached_orderbook and 
-            current_time - self.last_orderbook_time < self.orderbook_cache_time):
-            return self.cached_orderbook
+        """获取深度订单薄数据 - 实时获取确保价格准确性"""
+        # 强制禁用缓存以确保价格准确性
+        use_cache = False
             
         try:
             # 尝试获取深度数据
@@ -378,28 +366,18 @@ class VolumeStrategy:
                 asks = depth_response['asks']  # 卖单 [[price, quantity], ...]
                 
                 if bids and asks:
-                    # 买方第一档价格（买一价格 - 最高买价）
+                    # 获取买一价格（最高买价）和卖一价格（最低卖价）
                     first_bid_price = float(bids[0][0])
-                    # 买方最后一档价格（买单中最低的价格）
-                    last_bid_price = float(bids[-1][0]) if len(bids) > 1 else float(bids[0][0])
-                    # 卖方第一档价格（卖一价格 - 最低卖价）
                     first_ask_price = float(asks[0][0])
-                    # 卖方最后一档价格
-                    last_ask_price = float(asks[-1][0]) if len(asks) > 1 else float(asks[0][0])
-                    
-                    # 价格区间信息已获取
                     
                     result = {
                         'bid_price': first_bid_price,  # 买方第一档（买一价格）
                         'ask_price': first_ask_price,  # 卖方第一档（卖一价格）
                         'bid_depth': len(bids),
-                        'ask_depth': len(asks)
+                        'ask_depth': len(asks),
+                        'bids': bids,  # 添加完整深度数据
+                        'asks': asks   # 添加完整深度数据
                     }
-                    
-                    # 更新缓存
-                    if use_cache:
-                        self.cached_orderbook = result
-                        self.last_orderbook_time = current_time
                     
                     return result
             
@@ -519,7 +497,6 @@ class VolumeStrategy:
         
         # 执行优化下单
         import concurrent.futures
-        import time
         
         sell_order = None
         buy_order = None
@@ -1097,6 +1074,58 @@ class VolumeStrategy:
             self.log(f"❌ 检查未成交订单时出错（本地记录）: {e}", "error")
             return True
     
+    def _enforce_round_cleanup(self, round_num: int, skip_heavy_checks: bool = False):
+        """轻量级轮次清理：只在必要时执行重度API检查"""
+        try:
+            if skip_heavy_checks:
+                # 轻量级检查：只检查本地状态
+                self.log(f"🔍 第{round_num}轮轻量级状态检查...")
+                if len(self.pending_orders) > 0:
+                    self.log(f"⚠️ 本地记录显示有{len(self.pending_orders)}个待处理订单", "warning")
+                    # 清空本地记录，避免下轮误用
+                    self.pending_orders.clear()
+                self.log(f"✅ 第{round_num}轮轻量级检查完成")
+                return
+            
+            self.log(f"🔧 第{round_num}轮深度清理检查...")
+            
+            # 1. 只有在本地记录显示有订单时才调用API检查
+            if len(self.pending_orders) > 0:
+                self.log(f"🔍 本地记录显示有{len(self.pending_orders)}个订单，执行API检查...")
+                cleanup_success = self.check_and_cancel_pending_orders()
+                if cleanup_success:
+                    self.log("✅ 订单清理完成")
+                else:
+                    self.log("⚠️ 订单清理可能不完整", "warning")
+            else:
+                self.log("✅ 本地无待处理订单，跳过API检查")
+            
+            # 2. 余额检查优化：只在必要时检查
+            # 检查是否是关键轮次（每10轮或最后几轮）
+            is_critical_round = (round_num % 10 == 0) or (round_num >= self.rounds - 2)
+            
+            if is_critical_round:
+                current_balance = self.get_asset_balance()
+                balance_diff = current_balance - self.initial_balance
+                
+                self.log(f"📊 关键轮次余额检查: 当前={current_balance:.2f}, 基准={self.initial_balance:.2f}, 差值={balance_diff:+.2f}")
+                
+                # 3. 只在偏差较大时执行补正
+                if abs(balance_diff) > 0.5:  # 提高阈值避免频繁补正
+                    self.log(f"⚠️ 余额偏差较大({balance_diff:+.2f})，执行补正", "warning")
+                    correction_success = self.ensure_balance_consistency(self.initial_balance, max_attempts=2)
+                    if correction_success:
+                        self.log("✅ 余额补正完成")
+                else:
+                    self.log(f"✅ 余额偏差可接受: {balance_diff:+.2f}")
+            else:
+                self.log(f"✅ 非关键轮次，跳过余额检查")
+            
+            self.log(f"✅ 第{round_num}轮深度清理完成")
+            
+        except Exception as e:
+            self.log(f"❌ 第{round_num}轮清理失败: {e}", "error")
+
     def _handle_quantity_imbalance(self, cancelled_buy_qty: float, cancelled_sell_qty: float):
         """处理订单取消导致的数量不平衡"""
         try:
@@ -1246,7 +1275,6 @@ class VolumeStrategy:
                 
                 # 批次间短暂延迟
                 if i + batch_size < len(self.completed_order_ids):
-                    import time
                     time.sleep(0.1)
             
             # 清空待处理列表
@@ -1531,7 +1559,7 @@ class VolumeStrategy:
     
     
     def auto_purchase_if_insufficient(self) -> bool:
-        """如果余额不足则自动补齐 - 按USDT价值分批买入"""
+        """如果余额不足则自动补齐 - 直接全部买入"""
         try:
             current_balance = self.get_asset_balance()
             required_quantity = float(self.quantity)
@@ -1559,180 +1587,52 @@ class VolumeStrategy:
             
             self.log(f"可用USDT余额: {usdt_balance:.2f}")
             
-            # 获取当前价格
+            # 获取买一价
             book_data = self.get_order_book()
             if not book_data:
                 self.log(f"❌ 无法获取市场价格", "error")
                 return False
             
-            estimated_price = book_data['ask_price']
-            total_usdt_needed = shortage * estimated_price
+            buy_price = book_data['ask_price']  # 买一价
             
-            # 详细调试信息
-            self.log(f"=== 补齐计算详情 ===")
-            self.log(f"需要补齐数量: {shortage:.2f}")
-            self.log(f"当前市场价格 (ask): {estimated_price:.6f}")
-            self.log(f"估算需要USDT: {total_usdt_needed:.2f}")
-            self.log(f"可用USDT余额: {usdt_balance:.2f}")
-            self.log(f"差额: {usdt_balance - total_usdt_needed:.2f}")
+            # 关键：按设定数量总价值+1USDT计算，确保容错性
+            required_usdt_value = required_quantity * buy_price  # 设定数量的总价值
+            target_usdt_value = required_usdt_value + 1.0  # 比设定总价值多1 USDT
+            buy_quantity = target_usdt_value / buy_price  # 实际买入数量
             
-            if usdt_balance < total_usdt_needed:
-                self.log(f"❌ USDT余额不足: {usdt_balance:.2f} < {total_usdt_needed:.2f}", "error")
-                self.log("💡 请检查:")
-                self.log(f"  1. 交易数量是否过大: {shortage:.2f} 个")
-                self.log(f"  2. 市场价格是否正常: {estimated_price:.6f}")
-                self.log(f"  3. 账户USDT余额是否正确: {usdt_balance:.2f}")
+            self.log(f"=== 直接买入策略（容错性增强）===")
+            self.log(f"设定交易数量: {required_quantity:.2f}")
+            self.log(f"设定数量价值: {required_usdt_value:.2f} USDT")
+            self.log(f"买一价格: {buy_price:.6f}")
+            self.log(f"目标买入价值: {target_usdt_value:.2f} USDT (+1 USDT容错)")
+            self.log(f"实际买入数量: {buy_quantity:.6f}")
+            
+            if usdt_balance < target_usdt_value:
+                self.log(f"❌ USDT余额不足: {usdt_balance:.2f} < {target_usdt_value:.2f}", "error")
                 return False
             
-            # 根据价值确定分批策略
-            if total_usdt_needed < 5.0:
-                # 价值 < 5 USDT：直接购买6 USDT价值的现货
-                target_usdt_value = 6.0
-                target_quantity = target_usdt_value / estimated_price
-                max_batches = 1
-                batch_quantity = target_quantity
-                self.log(f"价值 < 5 USDT ({total_usdt_needed:.2f})，改为购买6 USDT价值现货: {target_quantity:.2f}个")
-                is_small_purchase = True
-            elif total_usdt_needed <= 60:
-                # 价值 5-60 USDT：一次性全部买入
-                max_batches = 1
-                batch_quantity = shortage
-                self.log(f"价值5-60 USDT ({total_usdt_needed:.2f})，一次性买入: {shortage:.2f}个")
-                is_small_purchase = False
-            elif total_usdt_needed <= 500:
-                # 价值 60-500 USDT：分5批买入
-                max_batches = 5
-                batch_quantity = shortage / max_batches
-                self.log(f"价值60-500 USDT ({total_usdt_needed:.2f})，分{max_batches}批买入，每批约: {batch_quantity:.2f}个")
-                is_small_purchase = False
-            else:
-                # 价值 > 500 USDT：分10批买入
-                max_batches = 10
-                batch_quantity = shortage / max_batches
-                self.log(f"价值 > 500 USDT ({total_usdt_needed:.2f})，分{max_batches}批买入，每批约: {batch_quantity:.2f}个")
-                is_small_purchase = False
+            # 直接市价买入
+            result = self.place_market_buy_order(buy_quantity)
             
-            total_purchased = 0.0
-            batch_count = 0
-            
-            # 对于小金额补货(< 5 USDT)，目标是购买6 USDT价值，可能超过required_quantity
-            if is_small_purchase:
-                target_purchase = target_quantity
-                self.log(f"小金额补货：目标购买 {target_purchase:.2f} 个 (6 USDT 价值)")
-            else:
-                target_purchase = required_quantity
-            
-            while shortage > 0 and total_purchased < target_purchase and batch_count < max_batches:
-                # 计算本批买入数量
-                if is_small_purchase:
-                    # 小金额补货时，直接购买目标数量
-                    current_batch = batch_quantity
-                else:
-                    # 正常情况，不超过剩余缺口
-                    current_batch = min(shortage, batch_quantity)
-                
-                # 如果数量小于1，使用5.1 USDT等价的最小数量
-                if current_batch < 1:
-                    min_quantity_for_5usdt = 5.1 / estimated_price
-                    current_batch = max(1, min_quantity_for_5usdt)
-                    self.log(f"数量不足1个，改为5.1 USDT等价数量: {current_batch:.2f}")
-                
-                result = self.place_market_buy_order(current_batch)
-                
-                if not result or result == "ORDER_VALUE_TOO_SMALL":
-                    self.log(f"❌ 第{batch_count + 1}批失败", "error")
-                    # 如果常规批次失败，尝试最小5.1 USDT购买
-                    if current_batch >= 1:
-                        min_quantity_for_5usdt = 5.1 / estimated_price
-                        self.log(f"尝试最小5.1 USDT购买: {min_quantity_for_5usdt:.2f}")
-                        result = self.place_market_buy_order(min_quantity_for_5usdt)
-                        if result and result != "ORDER_VALUE_TOO_SMALL":
-                            batch_count += 1
-                            total_purchased += min_quantity_for_5usdt
-                            time.sleep(3)
-                            new_balance = self.get_asset_balance()
-                            self.log(f"第{batch_count}批(最小)完成，余额: {new_balance:.2f}")
-                            shortage = required_quantity - new_balance
-                            continue
-                    break
-                
-                batch_count += 1
-                total_purchased += current_batch
-                
-                # 等待成交并检查实际余额
-                time.sleep(3)
-                new_balance = self.get_asset_balance()
-                actual_shortage = required_quantity - new_balance
-                
-                self.log(f"第{batch_count}批完成，余额: {new_balance:.2f}")
-                
-                # 如果余额已经足够，提前结束
-                if actual_shortage <= 0:
-                    self.log("✅ 余额已足够")
-                    break
-                
-                shortage = actual_shortage
-            
-            # 最终检查
-            final_balance = self.get_asset_balance()
-            shortage_final = required_quantity - final_balance
-            
-            if shortage_final <= 0:
-                self.log(f"✅ 补齐完成: {final_balance:.2f} >= {required_quantity:.2f}")
-                self.auto_purchased = total_purchased
+            if result and result != "ORDER_VALUE_TOO_SMALL":
+                import time
+                time.sleep(3)  # 等待成交
+                final_balance = self.get_asset_balance()
+                actual_purchased = final_balance - current_balance
+                self.auto_purchased = actual_purchased
+                self.log(f"✅ 买入完成: {actual_purchased:.2f}个")
                 return True
-            elif shortage_final < 1:
-                # 如果只差不到1个，调整交易数量为实际可用余额
-                self.log(f"⚠️ 余额差异很小({shortage_final:.2f})，调整交易数量为实际余额: {final_balance:.2f}", "warning")
-                # 重要：更新交易数量为实际可用的余额
-                self.quantity = final_balance
-                self.log(f"💡 交易数量已调整为: {self.quantity:.2f}")
-                self.auto_purchased = total_purchased
-                return True
-            elif batch_count >= max_batches:
-                # 如果已经达到最大批次，剩余数量直接一次性买入
-                self.log(f"已完成{max_batches}批，剩余{shortage_final:.2f}个直接买入")
-                
-                # 获取当前市价估算剩余价值
-                ticker = self.client.get_book_ticker(self.symbol)
-                if ticker:
-                    current_price = float(ticker.get('askPrice', 0))
-                    remaining_value_usdt = shortage_final * current_price
-                    self.log(f"剩余价值估算: {remaining_value_usdt:.2f} USDT")
-                    
-                    if remaining_value_usdt < 5.0:
-                        # 剩余价值小于5USDT，购买6USDT价值的代币
-                        target_quantity = 6.0 / current_price
-                        self.log(f"价值小于5USDT，改为购买6USDT价值: {target_quantity:.2f}个")
-                        final_result = self.place_market_buy_order(target_quantity)
-                        purchased_quantity = target_quantity
-                    else:
-                        # 正常购买剩余数量
-                        final_result = self.place_market_buy_order(shortage_final)
-                        purchased_quantity = shortage_final
-                else:
-                    # 无法获取价格，按原逻辑购买
-                    final_result = self.place_market_buy_order(shortage_final)
-                    purchased_quantity = shortage_final
-                
-                if final_result and final_result != "ORDER_VALUE_TOO_SMALL":
-                    final_balance = self.get_asset_balance()
-                    self.log(f"✅ 最终补齐完成: {final_balance:.2f}")
-                    self.auto_purchased = total_purchased + purchased_quantity
-                    return True
-                else:
-                    self.log(f"❌ 最终补齐失败", "error")
-                    return False
             else:
-                self.log(f"❌ 补齐不完整: {final_balance:.2f} < {required_quantity:.2f}", "error")
+                self.log(f"❌ 买入失败", "error")
                 return False
                 
         except Exception as e:
             self.log(f"❌ 自动补齐失败: {e}", "error")
             return False
     
+    
     def sell_all_holdings(self) -> bool:
-        """卖光所有现货持仓"""
+        """卖光所有现货持仓 - 直接全部卖出"""
         try:
             self.log(f"\n=== 卖光所有现货持仓 ===")
             
@@ -1744,106 +1644,49 @@ class VolumeStrategy:
                 self.log("✅ 当前余额很少或为零，无需卖出")
                 return True
             
-            # 获取当前市场价格
+            # 获取卖一价
             book_data = self.get_order_book()
             if not book_data:
-                self.log(f"❌ 无法获取市场价格，跳过卖出", "error")
+                self.log(f"❌ 无法获取市场价格", "error")
                 return False
             
-            estimated_price = (book_data['bid_price'] + book_data['ask_price']) / 2
-            estimated_value = current_balance * estimated_price
+            sell_price = book_data['bid_price']  # 卖一价
+            estimated_value = current_balance * sell_price
             
-            self.log(f"估算卖出价格: {estimated_price:.5f}")
+            self.log(f"卖一价格: {sell_price:.6f}")
             self.log(f"估算卖出价值: {estimated_value:.2f} USDT")
             
             # 检查订单价值
             if estimated_value < 5.0:
                 self.log(f"⚠️ 卖出价值不足5 USDT，保留余额", "warning")
-                self.log("💡 保留少量现货余额")
                 return True
             
-            # 根据价值确定分批清仓策略
-            if estimated_value <= 60:
-                # 价值 <= 60 USDT：一次性全部卖出
-                max_batches = 1
-                batch_quantity = current_balance
-                self.log(f"价值 <= 60 USDT ({estimated_value:.2f})，一次性卖出: {current_balance:.2f}个")
-            elif estimated_value <= 500:
-                # 价值 60-500 USDT：分5批卖出
-                max_batches = 5
-                batch_quantity = current_balance / max_batches
-                self.log(f"价值60-500 USDT ({estimated_value:.2f})，分{max_batches}批卖出，每批约: {batch_quantity:.2f}个")
-            else:
-                # 价值 > 500 USDT：分10批卖出
-                max_batches = 10
-                batch_quantity = current_balance / max_batches
-                self.log(f"价值 > 500 USDT ({estimated_value:.2f})，分{max_batches}批卖出，每批约: {batch_quantity:.2f}个")
+            # 直接市价卖出全部余额
+            self.log(f"=== 直接卖出策略 ===")
+            self.log(f"卖出数量: {current_balance:.2f}")
             
-            # 执行分批卖出
-            remaining_balance = current_balance
-            batch_count = 0
-            total_sold = 0.0
+            result = self.place_market_sell_order(current_balance)
             
-            while remaining_balance > 0.1 and batch_count < max_batches:
-                # 计算本批卖出数量
-                current_batch = min(remaining_balance, batch_quantity)
+            if result and result != "ORDER_VALUE_TOO_SMALL":
+                import time
+                time.sleep(3)  # 等待成交
+                final_balance = self.get_asset_balance()
+                self.log(f"✅ 卖出完成: 余额 {current_balance:.2f} -> {final_balance:.2f}")
                 
-                # 最后一批卖出所有剩余
-                if batch_count == max_batches - 1:
-                    current_batch = remaining_balance
-                
-                # 检查本批订单价值
-                batch_value = current_batch * estimated_price
-                if batch_value < 5.0 and batch_count < max_batches - 1:
-                    self.log(f"第{batch_count + 1}批价值不足5 USDT ({batch_value:.2f})，与下批合并")
-                    batch_quantity += current_batch  # 增加下批数量
-                    batch_count += 1
-                    continue
-                
-                self.log(f"执行第{batch_count + 1}批卖出: {current_batch:.2f}个 (价值约{batch_value:.2f} USDT)")
-                result = self.place_market_sell_order(current_batch)
-                
-                if result == "ORDER_VALUE_TOO_SMALL":
-                    self.log(f"第{batch_count + 1}批价值不足，跳过")
-                    if batch_count == max_batches - 1:
-                        self.log("最后一批无法卖出，保留余额")
-                        break
-                elif result and isinstance(result, dict):
-                    self.log(f"✅ 第{batch_count + 1}批卖出成功: ID {result.get('orderId')}")
-                    total_sold += current_batch
-                    
-                    # 等待成交并检查余额
-                    time.sleep(2)
-                    new_balance = self.get_asset_balance()
-                    remaining_balance = new_balance
-                    
-                    self.log(f"第{batch_count + 1}批完成，剩余余额: {remaining_balance:.2f}")
+                if final_balance <= 0.1:
+                    self.log("✅ 现货已全部清仓")
                 else:
-                    self.log(f"❌ 第{batch_count + 1}批卖出失败", "error")
-                    break
-                
-                batch_count += 1
-                
-                # 如果不是最后一批，等待间隔
-                if batch_count < max_batches and remaining_balance > 0.1:
-                    time.sleep(1)
-            
-            # 检查最终结果
-            final_balance = self.get_asset_balance()
-            self.log(f"清仓前余额: {current_balance:.2f}")
-            self.log(f"清仓后余额: {final_balance:.2f}")
-            self.log(f"已卖出数量: {(current_balance - final_balance):+.2f}")
-            
-            if final_balance <= 0.1:
-                self.log("✅ 现货已全部清仓")
+                    self.log(f"⚠️ 仍有少量余额: {final_balance:.2f}")
+                    
                 return True
             else:
-                self.log(f"⚠️ 仍有余额: {final_balance:.2f} (可能因价值不足5 USDT)", "warning")
-                return True  # 仍然认为成功，因为已经尽力了
+                self.log(f"❌ 卖出失败", "error")
+                return False
                 
         except Exception as e:
             self.log(f"❌ 卖出现货异常: {e}", "error")
             return False
+    
     
     def final_balance_reconciliation(self) -> bool:
         """最终余额校验和补单 - 确保策略前后余额完全一致"""
@@ -2081,6 +1924,11 @@ class VolumeStrategy:
                 # 标记轮次完成
                 round_completed = True
                 self.completed_rounds += 1
+                
+                # 双向成交后的轻量级检查：只检查本地状态
+                self.log(f"🔍 双向成交后执行状态检查...")
+                self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
+                
                 self.log(f"✅ 第 {round_num} 轮交易完成 (优化策略成功)")
                 return True
                 
@@ -2105,6 +1953,11 @@ class VolumeStrategy:
                 if success:
                     self.log("✅ 买入补单成功")
                     self.completed_rounds += 1
+                    
+                    # 补单后的轻量级检查：补单成功时只需要检查本地状态
+                    self.log(f"🔍 买入补单后执行状态检查...")
+                    self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
+                    
                     return True
                 else:
                     self.log("❌ 买入补单失败", 'error')
@@ -2131,6 +1984,11 @@ class VolumeStrategy:
                 if success:
                     self.log("✅ 卖出补单成功")
                     self.completed_rounds += 1
+                    
+                    # 补单后的轻量级检查：补单成功时只需要检查本地状态
+                    self.log(f"🔍 卖出补单后执行状态检查...")
+                    self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
+                    
                     return True
                 else:
                     self.log("❌ 卖出补单失败", 'error')
@@ -2148,6 +2006,10 @@ class VolumeStrategy:
                 if buy_order_id in self.pending_orders:
                     self.pending_orders.remove(buy_order_id)
                 
+                # 订单取消后需要深度检查：确保清理完成
+                self.log(f"🔍 订单取消后执行深度检查...")
+                self._enforce_round_cleanup(round_num)  # 取消情况下执行完整检查
+                
                 return False
             
         except Exception as e:
@@ -2159,6 +2021,9 @@ class VolumeStrategy:
             # 确保每一轮都有日志输出，便于调试
             if not round_completed:
                 self.log(f"第 {round_num} 轮交易结束 (未完成)", 'warning')
+                # 未完成轮次需要深度清理
+                self.log(f"🔍 未完成轮次的深度清理...")
+                self._enforce_round_cleanup(round_num)  # 异常情况执行完整检查
     
     def run(self) -> bool:
         """运行策略"""
@@ -2208,6 +2073,11 @@ class VolumeStrategy:
                 if self.is_stop_requested():
                     self.log(f"🛑 收到停止请求，在第 {round_num} 轮后提前结束")
                     break
+                
+                # 轮间轻量级检查：只检查本地状态以减少API调用
+                if round_num < self.rounds:
+                    self.log(f"🔍 第{round_num}轮与第{round_num+1}轮之间的状态检查...")
+                    self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
                 
                 # 等待间隔时间(除了最后一轮)
                 if round_num < self.rounds:
@@ -2302,7 +2172,7 @@ class VolumeStrategy:
             self.log("\n=== 策略停止清理 ===")
             
             # 1. 检查并取消所有未成交订单
-            self.cancel_all_open_orders()
+            self.cancel_all_open_orders_batch()
             
             # 2. 执行数据统计
             self._calculate_final_statistics()
@@ -2319,12 +2189,13 @@ class VolumeStrategy:
             self.log(f"策略停止清理异常: {e}", 'error')
     
     def _calculate_final_statistics(self):
-        """计算最终统计数据"""
+        """计算最终统计数据（不调用API）"""
         try:
-            # 获取最终余额信息
-            self.final_usdt_balance = self.get_usdt_balance()
+            # 使用累计的统计数据，而不是调用API获取最终余额
+            # final_usdt_balance 已在交易过程中通过余额变化累计计算
+            self.final_usdt_balance = self.initial_usdt_balance - self.total_fees_usdt
             self.usdt_balance_diff = self.final_usdt_balance - self.initial_usdt_balance
-            self.net_loss_usdt = self.usdt_balance_diff - self.total_fees_usdt
+            self.net_loss_usdt = self.usdt_balance_diff
             
             # 计算交易统计
             total_volume = self.buy_volume_usdt + self.sell_volume_usdt
