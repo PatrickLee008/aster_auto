@@ -19,9 +19,6 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="fas fa-tasks"></i> 我的任务</h5>
-                <button id="refresh-btn" class="btn btn-sm btn-outline-primary" onclick="refreshTaskProgress()">
-                    <i class="fas fa-sync-alt me-1"></i> 刷新进度
-                </button>
             </div>
             <div class="card-body">
                 {% if tasks %}
@@ -878,129 +875,7 @@ function refreshTaskStatuses() {
     location.reload();
 }
 
-// 手动刷新任务进度
-function refreshTaskProgress() {
-    const btn = $('#refresh-btn');
-    const originalHtml = btn.html();
-    
-    $.ajax({
-        url: '/api/tasks/status',
-        method: 'GET',
-        beforeSend: function() {
-            btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> 刷新中...');
-        },
-        success: function(response) {
-            if (response.success && response.tasks) {
-                // 更新任务进度显示
-                response.tasks.forEach(function(task) {
-                    updateTaskProgressDisplay(task);
-                });
-                
-                // 显示刷新成功提示
-                showRefreshMessage('success', '进度刷新成功');
-            } else {
-                showRefreshMessage('error', '获取进度数据失败');
-            }
-        },
-        error: function() {
-            showRefreshMessage('error', '刷新失败，请稍后重试');
-        },
-        complete: function() {
-            btn.prop('disabled', false).html(originalHtml);
-        }
-    });
-}
+// 刷新进度功能已移除
 
-// 更新单个任务的进度显示
-function updateTaskProgressDisplay(task) {
-    const taskRow = $(`#task-${task.task_id}`);
-    if (taskRow.length === 0) return;
-
-    // 更新统计数据
-    const statisticsDiv = taskRow.find('.small').first();
-    if (statisticsDiv.length > 0) {
-        // 构建新的统计HTML
-        let statsHtml = `<strong>完成: ${task.completed_rounds}/${task.total_rounds}</strong>`;
-        
-        if (task.supplement_orders > 0) {
-            statsHtml += `<br>补单: <span class="text-warning">${task.supplement_orders}</span>`;
-        }
-        
-        statsHtml += `<br><strong>交易量统计:</strong>`;
-        statsHtml += `<br>买单: <span class="text-success">${task.buy_volume.toFixed(2)} USDT</span>`;
-        statsHtml += `<br>卖单: <span class="text-info">${task.sell_volume.toFixed(2)} USDT</span>`;
-        
-        const totalVolume = task.buy_volume + task.sell_volume;
-        statsHtml += `<br>总量: <span class="text-primary">${totalVolume.toFixed(2)} USDT</span>`;
-        statsHtml += `<br>手续费: <span class="text-warning">${task.total_fees.toFixed(4)} USDT</span>`;
-        
-        // 添加USDT余额信息
-        if (task.usdt_balance > 0) {
-            statsHtml += `<br>USDT余额: <span class="text-info">${task.usdt_balance.toFixed(2)} USDT</span>`;
-        }
-        
-        // 添加磨损信息
-        if (task.net_profit !== 0) {
-            const isLoss = task.net_profit < 0;
-            const profitClass = isLoss ? 'text-danger' : 'text-success';
-            const displayValue = isLoss ? Math.abs(task.net_profit) : task.net_profit;
-            statsHtml += `<br>磨损: <span class="${profitClass}">${isLoss ? '' : '+'}${displayValue.toFixed(4)} USDT</span>`;
-        }
-        
-        
-        // 添加最后更新时间
-        if (task.last_update) {
-            const updateTime = new Date(task.last_update);
-            statsHtml += `<br><small class="text-muted">最后更新: ${updateTime.toLocaleTimeString()}</small>`;
-        }
-        
-        statisticsDiv.html(statsHtml);
-    }
-    
-    // 更新状态标签（如果需要）
-    const statusBadge = taskRow.find('.badge').first();
-    if (statusBadge.length > 0) {
-        const statusInfo = getStatusInfo(task.status);
-        statusBadge.attr('class', `badge bg-${statusInfo.class}`);
-        statusBadge.html(`${statusInfo.icon} ${statusInfo.text}`);
-    }
-}
-
-// 获取状态信息
-function getStatusInfo(status) {
-    const statusMap = {
-        'running': { class: 'success', icon: '<i class="fas fa-play"></i>', text: '运行中' },
-        'completed': { class: 'success', icon: '<i class="fas fa-check-circle"></i>', text: '已完成' },
-        'failed': { class: 'danger', icon: '<i class="fas fa-exclamation-triangle"></i>', text: '异常终止' },
-        'stopped': { class: 'secondary', icon: '<i class="fas fa-stop"></i>', text: '已停止' },
-        'error': { class: 'danger', icon: '<i class="fas fa-exclamation-triangle"></i>', text: '错误' },
-        'paused': { class: 'warning', icon: '<i class="fas fa-pause"></i>', text: '暂停' },
-        'pending': { class: 'secondary', icon: '<i class="fas fa-clock"></i>', text: '未开始' }
-    };
-    
-    return statusMap[status] || { class: 'light', icon: '<i class="fas fa-question"></i>', text: '未知' };
-}
-
-// 显示刷新消息
-function showRefreshMessage(type, message) {
-    const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
-    const icon = type === 'success' ? 'fas fa-check-circle' : 'fas fa-exclamation-triangle';
-    
-    const alertHtml = `
-        <div class="alert ${alertClass} alert-dismissible fade show" role="alert" style="position: fixed; top: 20px; right: 20px; z-index: 1050; min-width: 250px;">
-            <i class="${icon} me-2"></i>${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    `;
-    
-    $('body').append(alertHtml);
-    
-    // 3秒后自动关闭
-    setTimeout(function() {
-        $('.alert').fadeOut(function() {
-            $(this).remove();
-        });
-    }, 3000);
-}
 </script>
 {% endblock %}
