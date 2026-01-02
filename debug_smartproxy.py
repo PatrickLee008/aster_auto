@@ -10,11 +10,11 @@ import sys
 sys.path.append('.')
 
 def test_smartproxy_manager():
-    print("🔍 调试Smartproxy管理器状态")
+    print("=== 调试Smartproxy管理器状态 ===")
     print("=" * 50)
     
     # 1. 检查环境变量
-    print("📋 环境变量检查:")
+    print("环境变量检查:")
     smartproxy_vars = [
         'SMARTPROXY_ENABLED',
         'SMARTPROXY_BASE_USERNAME',
@@ -32,7 +32,7 @@ def test_smartproxy_manager():
         print(f"  {var} = {display}")
     
     # 2. 测试config_env加载
-    print(f"\n🔧 config_env模块测试:")
+    print(f"\nconfig_env模块测试:")
     try:
         from config_env import get_env_bool, get_env
         enabled = get_env_bool('SMARTPROXY_ENABLED', False)
@@ -44,24 +44,24 @@ def test_smartproxy_manager():
         print(f"  get_env('SMARTPROXY_PASSWORD') = {'***' if password else 'EMPTY'}")
         
     except Exception as e:
-        print(f"  ❌ config_env导入失败: {e}")
+        print(f"  config_env导入失败: {e}")
     
     # 3. 测试Smartproxy管理器
-    print(f"\n🎯 Smartproxy管理器测试:")
+    print(f"\nSmartproxy管理器测试:")
     try:
         from utils.smartproxy_manager import SmartproxyManager, get_proxy_manager, get_task_proxy_config
         
         # 创建管理器实例
         manager = SmartproxyManager()
-        print(f"  ✅ 管理器实例创建成功")
-        print(f"  📊 enabled = {manager.enabled}")
-        print(f"  👤 base_username = {manager.base_username[:3]}***{manager.base_username[-3:] if manager.base_username else ''}")
-        print(f"  🔐 password = {'***' if manager.password else 'EMPTY'}")
-        print(f"  🏠 residential_host = {manager.residential_endpoint}")
-        print(f"  🔌 residential_port = {manager.residential_port}")
+        print(f"  管理器实例创建成功")
+        print(f"  enabled = {manager.enabled}")
+        print(f"  base_username = {manager.base_username[:3]}***{manager.base_username[-3:] if manager.base_username else ''}")
+        print(f"  password = {'***' if manager.password else 'EMPTY'}")
+        print(f"  residential_host = {manager.residential_endpoint}")
+        print(f"  residential_port = {manager.residential_port}")
         
         # 测试获取代理配置
-        print(f"\n📡 测试获取任务代理配置 (任务ID: 39):")
+        print(f"\n测试获取任务代理配置 (任务ID: 39):")
         task_config = get_task_proxy_config(39, 'residential')
         print(f"  proxy_enabled = {task_config.get('proxy_enabled', False)}")
         
@@ -73,7 +73,7 @@ def test_smartproxy_manager():
             print(f"  country = {task_config.get('country', 'None')}")
             print(f"  current_ip = {task_config.get('current_ip', 'None')}")
         else:
-            print("  ❌ 代理未启用")
+            print("  代理未启用")
             
             # 检查为什么未启用
             if not manager.enabled:
@@ -84,7 +84,7 @@ def test_smartproxy_manager():
                 print("  原因: password为空")
         
     except Exception as e:
-        print(f"  ❌ Smartproxy管理器测试失败: {e}")
+        print(f"  Smartproxy管理器测试失败: {e}")
         import traceback
         traceback.print_exc()
 

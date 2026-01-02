@@ -85,9 +85,9 @@ class SmartproxyManager:
         # 格式：username-country-state-session-sessionID
         session_id = f"task{task_id:04d}"
         
-        # Smartproxy格式：指定美国俄亥俄州 + 独立粘性会话
-        # 参考官方格式，添加州级定位和会话隔离
-        username_with_location = f"{self.base_username}-country-US-state-OH-session-{session_id}"
+        # Smartproxy官方格式：user-username-country-us-state-us_ohio-session-sessionid
+        # 参考官方文档的精确格式
+        username_with_location = f"user-{self.base_username}-country-us-state-us_ohio-session-{session_id}"
         
         return {
             'proxy_type': 'residential',
