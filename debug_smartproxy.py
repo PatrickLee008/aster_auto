@@ -69,6 +69,9 @@ def test_smartproxy_manager():
             print(f"  proxy_host = {task_config.get('proxy_host', 'None')}")
             print(f"  proxy_port = {task_config.get('proxy_port', 'None')}")
             print(f"  proxy_type = {task_config.get('proxy_type', 'None')}")
+            print(f"  proxy_auth = {task_config.get('proxy_auth', 'None')[:20]}..." if task_config.get('proxy_auth') else "  proxy_auth = None")
+            print(f"  country = {task_config.get('country', 'None')}")
+            print(f"  current_ip = {task_config.get('current_ip', 'None')}")
         else:
             print("  ❌ 代理未启用")
             

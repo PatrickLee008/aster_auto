@@ -80,26 +80,28 @@ class SmartproxyManager:
             return None
     
     def _create_residential_proxy(self, task_id: int) -> Dict:
-        """创建住宅代理（粘性会话）"""
-        # Smartproxy粘性会话格式：确保获得美国IP
-        # 在用户名中明确指定美国+会话ID
+        """创建住宅代理（美国俄亥俄州粘性会话）"""
+        # 基于decodo官方格式，动态创建美国俄亥俄州IP
+        # 格式：username-country-state-session-sessionID
         session_id = f"task{task_id:04d}"
         
-        # 尝试在用户名中明确指定国家和会话
-        username_with_country = f"{self.base_username}-country-US-session-{session_id}"
+        # Smartproxy格式：指定美国俄亥俄州 + 独立粘性会话
+        # 参考官方格式，添加州级定位和会话隔离
+        username_with_location = f"{self.base_username}-country-US-state-OH-session-{session_id}"
         
         return {
             'proxy_type': 'residential',
-            'protocol': 'http',  # 使用HTTP协议，适合API请求
-            'host': self.residential_endpoint,
-            'port': self.residential_port,
-            'username': username_with_country,  # 明确指定美国+独立会话
-            'password': self.password,
+            'protocol': 'http',
+            'host': self.residential_endpoint,  # gate.decodo.com
+            'port': self.residential_port,      # 10001
+            'username': username_with_location,  # sp9y3nhxbw-country-US-state-OH-session-taskXXXX
+            'password': self.password,          # ez8m5F~gl6jG9snvPU
             'country': 'US',
+            'state': 'OH',  # 俄亥俄州
             'task_id': task_id,
             'session_id': session_id,
             'sticky_duration': f'{self.session_duration}min',
-            'display_info': f"美国住宅IP (会话: {session_id}, {self.session_duration}分钟)"
+            'display_info': f"美国俄亥俄州住宅IP (会话: {session_id}, {self.session_duration}分钟)"
         }
     
     def _create_datacenter_proxy(self, task_id: int) -> Dict:
@@ -121,31 +123,48 @@ class SmartproxyManager:
         }
     
     def _test_proxy_connection(self, proxy_config: Dict) -> bool:
-        """测试代理连接"""
+        """测试代理连接（基于decodo官方格式）"""
         try:
-            proxy_url = f"http://{proxy_config['username']}:{proxy_config['password']}@{proxy_config['host']}:{proxy_config['port']}"
+            # 使用decodo官方推荐的格式和测试URL
+            username = proxy_config['username']
+            password = proxy_config['password'] 
+            host = proxy_config['host']
+            port = proxy_config['port']
+            
+            proxy_url = f"http://{username}:{password}@{host}:{port}"
             proxies = {
                 'http': proxy_url,
                 'https': proxy_url
             }
             
-            # 测试连接到IP检查服务
+            # 使用decodo官方推荐的测试URL
+            test_url = 'https://ip.decodo.com/json'
+            
             response = requests.get(
-                'https://api.ipify.org?format=json',
+                test_url,
                 proxies=proxies,
-                timeout=10
+                timeout=8,  # 稍微缩短超时时间
+                headers={'User-Agent': 'AsterAuto/1.0'}
             )
             
             if response.status_code == 200:
                 ip_info = response.json()
-                proxy_config['current_ip'] = ip_info.get('ip', 'unknown')
-                self.logger.info(f"代理测试成功，当前IP: {proxy_config['current_ip']}")
+                current_ip = ip_info.get('ip', 'unknown')
+                country = ip_info.get('country', {}).get('name', 'Unknown') if isinstance(ip_info.get('country'), dict) else str(ip_info.get('country', 'Unknown'))
+                region = ip_info.get('region', 'Unknown')
+                
+                proxy_config['current_ip'] = current_ip
+                proxy_config['actual_country'] = country  
+                proxy_config['actual_region'] = region
+                
+                self.logger.info(f"代理测试成功 - IP: {current_ip}, 位置: {region}, {country}")
                 return True
             else:
+                self.logger.warning(f"代理测试HTTP错误: {response.status_code}")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"代理连接测试失败: {e}")
+            self.logger.warning(f"代理连接测试失败: {e}")
             return False
     
     def get_proxy_dict_for_requests(self, proxy_config: Dict) -> Dict[str, str]:
