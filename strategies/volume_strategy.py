@@ -1954,68 +1954,106 @@ class VolumeStrategy:
                 return True
                 
             elif sell_filled and not buy_filled:
-                # 只有卖单成交，执行买入补单
-                self.log("📈 卖单成交，买单未成交 - 执行买入补单")
-                # 延迟统计更新
-                self.completed_order_ids.append(sell_order_id)
-                
-                # 取消买单
-                self.cancel_order(buy_order_id)
-                
-                # 移除订单
-                if sell_order_id in self.pending_orders:
-                    self.pending_orders.remove(sell_order_id)
-                if buy_order_id in self.pending_orders:
-                    self.pending_orders.remove(buy_order_id)
-                
-                # 市价买入补单
-                time.sleep(0.5)
-                success = self.place_market_buy_order(actual_quantity)
-                if success:
-                    self.log("✅ 买入补单成功")
-                    self.supplement_orders += 1  # 增加补单计数
+                # 只有卖单成交，检查是否为最后一轮
+                if round_num == self.rounds:
+                    self.log("📈 卖单成交，买单未成交 - 最后一轮，不执行补单")
+                    # 延迟统计更新
+                    self.completed_order_ids.append(sell_order_id)
+                    
+                    # 取消买单
+                    self.cancel_order(buy_order_id)
+                    
+                    # 移除订单
+                    if sell_order_id in self.pending_orders:
+                        self.pending_orders.remove(sell_order_id)
+                    if buy_order_id in self.pending_orders:
+                        self.pending_orders.remove(buy_order_id)
+                    
+                    self.log("💡 最后一轮单边成交，余额差异将在清理库存阶段处理")
                     self.completed_rounds += 1
-                    
-                    # 补单后的轻量级检查：补单成功时只需要检查本地状态
-                    self.log(f"🔍 买入补单后执行状态检查...")
-                    self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
-                    
                     return True
                 else:
-                    self.log("❌ 买入补单失败", 'error')
-                    return False
+                    # 非最后一轮，执行买入补单
+                    self.log("📈 卖单成交，买单未成交 - 执行买入补单")
+                    # 延迟统计更新
+                    self.completed_order_ids.append(sell_order_id)
+                    
+                    # 取消买单
+                    self.cancel_order(buy_order_id)
+                    
+                    # 移除订单
+                    if sell_order_id in self.pending_orders:
+                        self.pending_orders.remove(sell_order_id)
+                    if buy_order_id in self.pending_orders:
+                        self.pending_orders.remove(buy_order_id)
+                    
+                    # 市价买入补单
+                    time.sleep(0.5)
+                    success = self.place_market_buy_order(actual_quantity)
+                    if success:
+                        self.log("✅ 买入补单成功")
+                        self.supplement_orders += 1  # 增加补单计数
+                        self.completed_rounds += 1
+                        
+                        # 补单后的轻量级检查：补单成功时只需要检查本地状态
+                        self.log(f"🔍 买入补单后执行状态检查...")
+                        self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
+                        
+                        return True
+                    else:
+                        self.log("❌ 买入补单失败", 'error')
+                        return False
                     
             elif buy_filled and not sell_filled:
-                # 只有买单成交，执行卖出补单
-                self.log("📉 买单成交，卖单未成交 - 执行卖出补单")
-                # 延迟统计更新
-                self.completed_order_ids.append(buy_order_id)
-                
-                # 取消卖单
-                self.cancel_order(sell_order_id)
-                
-                # 移除订单
-                if sell_order_id in self.pending_orders:
-                    self.pending_orders.remove(sell_order_id)
-                if buy_order_id in self.pending_orders:
-                    self.pending_orders.remove(buy_order_id)
-                
-                # 市价卖出补单
-                time.sleep(0.5)
-                success = self.place_market_sell_order(actual_quantity)
-                if success:
-                    self.log("✅ 卖出补单成功")
-                    self.supplement_orders += 1  # 增加补单计数
+                # 只有买单成交，检查是否为最后一轮
+                if round_num == self.rounds:
+                    self.log("📉 买单成交，卖单未成交 - 最后一轮，不执行补单")
+                    # 延迟统计更新
+                    self.completed_order_ids.append(buy_order_id)
+                    
+                    # 取消卖单
+                    self.cancel_order(sell_order_id)
+                    
+                    # 移除订单
+                    if sell_order_id in self.pending_orders:
+                        self.pending_orders.remove(sell_order_id)
+                    if buy_order_id in self.pending_orders:
+                        self.pending_orders.remove(buy_order_id)
+                    
+                    self.log("💡 最后一轮单边成交，余额差异将在清理库存阶段处理")
                     self.completed_rounds += 1
-                    
-                    # 补单后的轻量级检查：补单成功时只需要检查本地状态
-                    self.log(f"🔍 卖出补单后执行状态检查...")
-                    self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
-                    
                     return True
                 else:
-                    self.log("❌ 卖出补单失败", 'error')
-                    return False
+                    # 非最后一轮，执行卖出补单
+                    self.log("📉 买单成交，卖单未成交 - 执行卖出补单")
+                    # 延迟统计更新
+                    self.completed_order_ids.append(buy_order_id)
+                    
+                    # 取消卖单
+                    self.cancel_order(sell_order_id)
+                    
+                    # 移除订单
+                    if sell_order_id in self.pending_orders:
+                        self.pending_orders.remove(sell_order_id)
+                    if buy_order_id in self.pending_orders:
+                        self.pending_orders.remove(buy_order_id)
+                    
+                    # 市价卖出补单
+                    time.sleep(0.5)
+                    success = self.place_market_sell_order(actual_quantity)
+                    if success:
+                        self.log("✅ 卖出补单成功")
+                        self.supplement_orders += 1  # 增加补单计数
+                        self.completed_rounds += 1
+                        
+                        # 补单后的轻量级检查：补单成功时只需要检查本地状态
+                        self.log(f"🔍 卖出补单后执行状态检查...")
+                        self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
+                        
+                        return True
+                    else:
+                        self.log("❌ 卖出补单失败", 'error')
+                        return False
             
             else:
                 # 都未成交，取消订单
