@@ -525,9 +525,7 @@ class VolumeStrategy:
                 buy_price = trade_price
                 sell_price = trade_price
                 strategy_type = "自成交"
-                self.log(f"🎯 有空隙自成交: 价格={trade_price:.5f}")
-                self.log(f"📊 空隙档位: {len(gap_prices)}档 [{gap_prices[0]:.5f} ... {gap_prices[-1]:.5f}]")
-                self.log(f"📊 买一{bid_price:.5f} -> 自成交{trade_price:.5f} -> 卖一{ask_price:.5f}")
+                self.log(f"🎯 自成交: {trade_price:.5f} ({len(gap_prices)}档空隙)")
             else:
                 # 理论上不应该到这里
                 buy_price = ask_price
@@ -538,11 +536,9 @@ class VolumeStrategy:
             buy_price = ask_price    # 买单挂卖一价，更容易成交
             sell_price = bid_price   # 卖单挂买一价，更容易成交
             strategy_type = "交叉挂单"
-            self.log(f"🎯 无空隙交叉挂单: 买单={buy_price:.5f}(卖一价), 卖单={sell_price:.5f}(买一价)")
-            self.log(f"📊 紧贴价位: 买一{bid_price:.5f} <-> 卖一{ask_price:.5f}")
-            self.log(f"📊 tick_size={tick_size_float:.6f}, 下一档={next_bid_price:.5f}")
+            self.log(f"🎯 交叉挂单: 买{buy_price:.5f}/卖{sell_price:.5f}")
         
-        self.log(f"✅ 策略类型: {strategy_type}")
+        # 立即执行，减少延迟
         
         # 同时提交买卖单（不同价格）
         import concurrent.futures
