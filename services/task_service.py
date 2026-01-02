@@ -61,8 +61,7 @@ class TaskService:
                 return False, "交易品种不能为空", None
             if quantity <= 0:
                 return False, "交易数量必须大于0", None
-            if interval <= 0:
-                return False, "间隔时间必须大于0", None
+            # interval不再验证，允许为0
             if rounds <= 0:
                 return False, "循环次数必须大于0", None
             
@@ -334,8 +333,7 @@ class TaskService:
                 task.quantity = quantity
             if 'interval' in kwargs:
                 interval = int(kwargs['interval'])
-                if interval <= 0:
-                    return False, "间隔时间必须大于0"
+                # interval不再验证，允许为0
                 task.interval = interval
             if 'rounds' in kwargs:
                 rounds = int(kwargs['rounds'])
