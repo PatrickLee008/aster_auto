@@ -424,6 +424,53 @@ class VolumeStrategy:
             return None
     
     
+    def generate_balanced_trade_prices(self, bid_price: float, ask_price: float) -> tuple:
+        """
+        智能平衡定价策略 - 解决买卖不平衡问题
+        返回: (buy_price, sell_price)
+        """
+        price_range = ask_price - bid_price
+        
+        if price_range <= 0.000100:
+            # 极小价差策略：错位定价，避免同时成交
+            buy_price = bid_price - 0.000100   # 买单更保守，低于买一
+            sell_price = ask_price + 0.000100  # 卖单更保守，高于卖一
+            self.log(f"🎯 极小价差策略: 买={buy_price:.5f}, 卖={sell_price:.5f}, 价差={price_range:.6f}")
+        else:
+            # 正常价差策略：分离定价，平衡成交率
+            import random
+            
+            # 买单偏向买一价（20%-40%），提高买单成交率
+            buy_offset = random.uniform(0.2, 0.4)
+            buy_price = bid_price + (price_range * buy_offset)
+            
+            # 卖单偏向卖一价（60%-80%），提高卖单成交率
+            sell_offset = random.uniform(0.6, 0.8) 
+            sell_price = bid_price + (price_range * sell_offset)
+            
+            self.log(f"🎯 平衡定价策略: 买偏移={buy_offset:.2f}, 卖偏移={sell_offset:.2f}")
+            self.log(f"   买价={buy_price:.5f} (距买一: {(buy_price-bid_price)*100000:.1f}ticks)")
+            self.log(f"   卖价={sell_price:.5f} (距卖一: {(ask_price-sell_price)*100000:.1f}ticks)")
+        
+        # 格式化价格
+        buy_price = float(self.format_price(buy_price))
+        sell_price = float(self.format_price(sell_price))
+        
+        # 检查订单价值（确保≥5 USDT）
+        buy_value = buy_price * float(self.quantity)
+        sell_value = sell_price * float(self.quantity)
+        
+        if buy_value < 5.0:
+            min_buy_price = 5.0 / float(self.quantity)
+            buy_price = max(buy_price, round(min_buy_price, 5))
+            
+        if sell_value < 5.0:
+            min_sell_price = 5.0 / float(self.quantity)
+            sell_price = max(sell_price, round(min_sell_price, 5))
+        
+        self.log(f"✅ 最终定价: 买单={buy_price:.5f}, 卖单={sell_price:.5f}")
+        return (buy_price, sell_price)
+    
     def generate_optimized_trade_price(self, bid_price: float, ask_price: float, strategy: str = 'narrow_spread') -> float:
         """优化的交易价格生成策略"""
         
@@ -498,25 +545,21 @@ class VolumeStrategy:
         spread = book_data['ask_price'] - book_data['bid_price']
         self.log(f"当前价差: {spread:.6f}")
         
-        # 根据价差选择策略
-        if spread <= 0.000100:  # 价差很小，使用窄价差策略
-            strategy = 'narrow_spread'
-            delay_ms = 5  # 5ms延迟
-        elif spread <= 0.000300:  # 中等价差，使用自适应策略
-            strategy = 'adaptive'
-            delay_ms = 8  # 8ms延迟
-        else:  # 价差较大，使用中位价策略
-            strategy = 'mid_price'
-            delay_ms = 10  # 10ms延迟
-        
-        # 生成优化价格
-        trade_price = self.generate_optimized_trade_price(
+        # 使用智能平衡定价策略
+        buy_price, sell_price = self.generate_balanced_trade_prices(
             book_data['bid_price'], 
-            book_data['ask_price'], 
-            strategy
+            book_data['ask_price']
         )
         
-        self.log(f"🎯 优化策略执行 - 策略: {strategy}, 价格: {trade_price:.5f}, 延迟: {delay_ms}ms")
+        # 根据价差调整延迟
+        if spread <= 0.000100:
+            delay_ms = 5   # 极小价差，快速下单
+        elif spread <= 0.000300:
+            delay_ms = 8   # 中等价差
+        else:
+            delay_ms = 10  # 大价差，稍微延迟
+        
+        self.log(f"🚀 智能平衡策略: 买价={buy_price:.5f}, 卖价={sell_price:.5f}, 延迟={delay_ms}ms")
         
         # 执行优化下单
         import concurrent.futures
@@ -526,14 +569,14 @@ class VolumeStrategy:
         
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                # 提交卖单
-                sell_future = executor.submit(self.place_sell_order, trade_price, actual_quantity)
+                # 提交卖单（使用卖单专用价格）
+                sell_future = executor.submit(self.place_sell_order, sell_price, actual_quantity)
                 
                 # 优化延迟
                 time.sleep(delay_ms / 1000.0)
                 
-                # 提交买单
-                buy_future = executor.submit(self.place_buy_order, trade_price, actual_quantity)
+                # 提交买单（使用买单专用价格）
+                buy_future = executor.submit(self.place_buy_order, buy_price, actual_quantity)
                 
                 # 获取结果
                 try:
@@ -1538,7 +1581,11 @@ class VolumeStrategy:
             
             # 计算差异的USDT价值
             try:
-                current_price = self.get_current_price()
+                # 获取当前市场价格
+                book_data = self.get_order_book()
+                if not book_data:
+                    raise Exception("无法获取订单簿数据")
+                current_price = (book_data['bid_price'] + book_data['ask_price']) / 2
                 diff_value_usdt = abs(balance_diff) * current_price
                 
                 if diff_value_usdt < 5.0:
@@ -1926,6 +1973,7 @@ class VolumeStrategy:
                 success = self.place_market_buy_order(actual_quantity)
                 if success:
                     self.log("✅ 买入补单成功")
+                    self.supplement_orders += 1  # 增加补单计数
                     self.completed_rounds += 1
                     
                     # 补单后的轻量级检查：补单成功时只需要检查本地状态
@@ -1957,6 +2005,7 @@ class VolumeStrategy:
                 success = self.place_market_sell_order(actual_quantity)
                 if success:
                     self.log("✅ 卖出补单成功")
+                    self.supplement_orders += 1  # 增加补单计数
                     self.completed_rounds += 1
                     
                     # 补单后的轻量级检查：补单成功时只需要检查本地状态
