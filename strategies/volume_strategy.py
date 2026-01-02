@@ -499,27 +499,30 @@ class VolumeStrategy:
         spread = book_data['ask_price'] - book_data['bid_price']
         self.log(f"当前价差: {spread:.6f}")
         
-        # 根据价差选择策略
-        if spread <= 0.000200:  # 极小价差
-            strategy = 'narrow_spread'
-            delay_ms = 5  # 5ms延迟
-        elif spread <= 0.001000:  # 中等价差
-            strategy = 'adaptive'
-            delay_ms = 8  # 8ms延迟
-        else:  # 价差较大，使用中位价策略
-            strategy = 'mid_price'
-            delay_ms = 10  # 10ms延迟
+        # 简单中间价定价策略
+        bid_price = book_data['bid_price']
+        ask_price = book_data['ask_price']
         
-        # 生成优化价格
-        trade_price = self.generate_optimized_trade_price(
-            book_data['bid_price'], 
-            book_data['ask_price'], 
-            strategy
-        )
+        # 计算中间价
+        mid_price = (bid_price + ask_price) / 2
         
-        self.log(f"🎯 优化策略执行 - 策略: {strategy}, 价格: {trade_price:.5f}, 延迟: {delay_ms}ms")
+        # 格式化为交易对精度
+        mid_price_formatted = float(self.format_price(mid_price))
         
-        # 执行优化下单
+        # 检查是否存在有效中间价
+        if mid_price_formatted == bid_price or mid_price_formatted == ask_price:
+            # 没有中间价，随机选择买一或卖一
+            import random
+            trade_price = random.choice([bid_price, ask_price])
+            self.log(f"🎯 无中间价，随机选择: {trade_price:.5f} (买一:{bid_price:.5f}, 卖一:{ask_price:.5f})")
+        else:
+            # 使用中间价
+            trade_price = mid_price_formatted
+            self.log(f"🎯 中间价策略: {trade_price:.5f} (买一:{bid_price:.5f}, 卖一:{ask_price:.5f})")
+        
+        self.log(f"📊 最终交易价格: {trade_price:.5f}")
+        
+        # 同时提交买卖单
         import concurrent.futures
         
         sell_order = None
@@ -527,21 +530,25 @@ class VolumeStrategy:
         
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                # 提交卖单
+                # 同时提交买卖单
+                self.log(f"⏰ 同时提交买卖单...")
                 sell_future = executor.submit(self.place_sell_order, trade_price, actual_quantity)
-                
-                # 优化延迟
-                time.sleep(delay_ms / 1000.0)
-                
-                # 提交买单
                 buy_future = executor.submit(self.place_buy_order, trade_price, actual_quantity)
                 
-                # 获取结果
+                # 获取下单结果
                 try:
                     sell_order = sell_future.result(timeout=10)
                     buy_order = buy_future.result(timeout=10)
                 except Exception as e:
-                    self.log(f"❌ 优化下单异常: {e}", 'error')
+                    self.log(f"❌ 下单异常: {e}", 'error')
+                    return None, None
+                
+                if sell_order and buy_order:
+                    self.log(f"✅ 买卖单提交成功 - 卖单:{sell_order.get('orderId')}, 买单:{buy_order.get('orderId')}")
+                    self.log(f"⏳ 等待3秒成交...")
+                    time.sleep(3)  # 等待3秒成交
+                else:
+                    self.log(f"❌ 买卖单提交失败", 'error')
                     return None, None
             
             if sell_order and buy_order:
