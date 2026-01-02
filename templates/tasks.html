@@ -532,7 +532,7 @@ $(document).ready(function() {
             strategy_id: $('#taskStrategy').val(),
             symbol: $('#taskSymbol').val(),
             quantity: $('#taskQuantity').val(),
-            interval: $('#taskInterval').val(),
+            interval: 0,  // 不再使用间隔时间
             rounds: $('#taskRounds').val(),
             leverage: leverage,
             side: 'both',  // 固定为双向交易，由策略内部决定具体方向
@@ -577,7 +577,7 @@ $(document).ready(function() {
             strategy_id: $('#editTaskStrategy').val(),
             symbol: $('#editTaskSymbol').val(),
             quantity: $('#editTaskQuantity').val(),
-            interval: $('#editTaskInterval').val(),
+            interval: 0,  // 不再使用间隔时间
             rounds: $('#editTaskRounds').val(),
             leverage: editLeverage,
             side: 'both',  // 固定为双向交易，由策略内部决定具体方向
@@ -819,7 +819,7 @@ function populateEditForm(task) {
     const params = task.parameters || {};
     $('#editTaskSymbol').val(params.symbol || task.symbol || '');
     $('#editTaskQuantity').val(params.quantity || task.quantity || '');
-    $('#editTaskInterval').val(params.interval || task.interval || '');
+    // interval字段已移除，不再需要设置
     $('#editTaskRounds').val(params.rounds || task.rounds || '');
     
     // 根据钱包类型处理杠杆字段
