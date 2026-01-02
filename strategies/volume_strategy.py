@@ -539,9 +539,7 @@ class VolumeStrategy:
                 quantity = float(self.quantity)
             
             # 确保数量精度正确，使用交易对的step_size
-            import math
-            adjusted_quantity = math.floor(quantity * 100) / 100
-            quantity_str = self.format_quantity(adjusted_quantity)
+            quantity_str = self.format_quantity(quantity)
             
             # 格式化价格，使用交易对的tick_size
             price_str = self.format_price(price)
@@ -590,9 +588,7 @@ class VolumeStrategy:
                 quantity = float(self.quantity)
             
             # 确保数量精度正确，使用交易对的step_size
-            import math
-            adjusted_quantity = math.floor(quantity * 100) / 100
-            quantity_str = self.format_quantity(adjusted_quantity)
+            quantity_str = self.format_quantity(quantity)
             
             # 格式化价格，使用交易对的tick_size
             price_str = self.format_price(price)
@@ -1293,10 +1289,8 @@ class VolumeStrategy:
             if quantity <= 0:
                 return None
             
-            # 确保数量至少为1
-            import math
-            adjusted_quantity = max(1, math.floor(quantity))
-            quantity_str = str(int(adjusted_quantity))
+            # 使用交易对的step_size进行精度标准化
+            quantity_str = self.format_quantity(quantity)
             
             # 使用专用的市价单客户端
             result = self.market_client.place_market_buy_order(self.symbol, quantity_str)
@@ -1358,13 +1352,11 @@ class VolumeStrategy:
                 self.log(f"❌ 无效数量: {quantity}", 'error')
                 return None
             
-            # 简化处理：去掉小数点，直接使用整数
-            import math
-            adjusted_quantity = math.floor(quantity)
-            quantity_str = str(int(adjusted_quantity))
+            # 使用交易对的step_size进行精度标准化
+            quantity_str = self.format_quantity(quantity)
             
             self.log(f"市价卖出原始数量: {quantity:.6f}")
-            self.log(f"市价卖出调整为整数: {quantity_str}")
+            self.log(f"市价卖出标准化数量: {quantity_str}")
             
             # 使用专用的市价单客户端
             result = self.market_client.place_market_sell_order(self.symbol, quantity_str)
@@ -1499,11 +1491,25 @@ class VolumeStrategy:
             self.log(f"  当前余额: {current_balance:.2f}")
             self.log(f"  余额差异: {balance_diff:.2f}")
             
-            # 允许较小的误差（0.1个币以内可忽略）
+            # 检查差异价值，小于5 USDT的差异不处理
             if abs(balance_diff) <= 0.1:
                 self.log(f"✅ 余额差异在可接受范围内: {balance_diff:.2f} (≤0.1)")
                 self.log("✅ 余额一致性检查通过")
                 return True
+            
+            # 计算差异的USDT价值
+            try:
+                current_price = self.get_current_price()
+                diff_value_usdt = abs(balance_diff) * current_price
+                
+                if diff_value_usdt < 5.0:
+                    self.log(f"💡 余额差异价值 {diff_value_usdt:.2f} USDT < 5 USDT，跳过补单")
+                    self.log("✅ 小额差异视为平衡，检查通过")
+                    return True
+                
+                self.log(f"余额差异价值: {diff_value_usdt:.2f} USDT (≥5 USDT)，执行补单")
+            except Exception as e:
+                self.log(f"⚠️ 无法计算差异价值: {e}，按数量判断")
             
             # 余额不一致且超过0.1，需要补单
             if balance_diff > 0.1:
@@ -1804,39 +1810,42 @@ class VolumeStrategy:
         # 智能余额检查：先清理订单释放资金，再获取真实可用余额
         available_balance = self.smart_balance_check()
         
-        # 检查余额是否足够本轮交易（增加安全边际）
-        required_quantity = float(self.quantity)
+        # 基于实际余额动态计算交易数量（而非固定数量）
+        base_quantity = float(self.quantity)  # 基础参考数量
         safety_margin = 0.2  # 安全边际：保留0.2个币
         
-        if available_balance < required_quantity + safety_margin:
-            self.log(f"⚠️ 可用余额不足（含安全边际）: {available_balance:.2f} < {required_quantity:.2f} + {safety_margin:.1f}", "warning")
+        # 计算本轮实际可用数量
+        max_usable = available_balance - safety_margin
+        actual_quantity = min(base_quantity, max_usable)
+        
+        self.log(f"💰 本轮交易数量计算:")
+        self.log(f"  可用余额: {available_balance:.2f}")
+        self.log(f"  安全边际: {safety_margin:.2f}")
+        self.log(f"  基础数量: {base_quantity:.2f}")
+        self.log(f"  实际数量: {actual_quantity:.2f}")
+        
+        if actual_quantity < 1.0:
+            self.log(f"⚠️ 余额过低，本轮实际可用数量不足1.0: {actual_quantity:.2f}", "warning")
+            self.log(f"❌ 触发自动补货...", "warning")
             
-            # 计算安全的交易数量
-            safe_quantity = available_balance - safety_margin
-            
-            if safe_quantity > 0 and safe_quantity >= required_quantity * 0.95:  # 至少保证95%的目标数量
-                self.log(f"💡 调整交易数量为安全数量: {safe_quantity:.2f}")
-                actual_quantity = safe_quantity
-            else:
-                self.log(f"❌ 即使调整后数量仍不足，触发自动补货", "warning")
-                # 余额不足就触发补货
-                if self.auto_purchase_if_insufficient():
-                    self.log(f"✅ 补货成功，重新检查余额")
-                    # 重新获取余额
-                    available_balance = self.smart_balance_check()
-                    if available_balance >= required_quantity + safety_margin:
-                        actual_quantity = available_balance - safety_margin
-                        self.log(f"✅ 补货后余额充足，使用数量: {actual_quantity:.2f}")
-                    else:
-                        self.log(f"❌ 补货后余额仍不足，跳过本轮", "error")
-                        return False
-                else:
-                    self.log(f"❌ 补货失败，跳过本轮", "error")
+            # 余额不足就触发补货
+            if self.auto_purchase_if_insufficient():
+                self.log(f"✅ 补货成功，重新计算交易数量")
+                # 重新获取余额并计算
+                available_balance = self.smart_balance_check()
+                max_usable = available_balance - safety_margin
+                actual_quantity = min(base_quantity, max_usable)
+                self.log(f"✅ 补货后可用数量: {actual_quantity:.2f}")
+                
+                if actual_quantity < 1.0:
+                    self.log(f"❌ 补货后余额仍不足，跳过本轮", "error")
                     return False
-        else:
-            # 即使余额充足，也使用安全数量避免精度问题
-            actual_quantity = available_balance - safety_margin
-            self.log(f"✅ 余额充足，使用安全数量: {actual_quantity:.2f} (原{required_quantity:.2f})")
+            else:
+                self.log(f"❌ 补货失败，跳过本轮", "error")
+                return False
+        
+        # 确保使用标准化的实际数量
+        self.log(f"✅ 本轮使用交易数量: {actual_quantity:.2f}")
         
         # 初始化本轮状态
         round_completed = False
