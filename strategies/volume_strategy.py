@@ -499,30 +499,52 @@ class VolumeStrategy:
         spread = book_data['ask_price'] - book_data['bid_price']
         self.log(f"当前价差: {spread:.6f}")
         
-        # 简单中间价定价策略
+        # 基于订单簿空隙的自成交策略
         bid_price = book_data['bid_price']
         ask_price = book_data['ask_price']
         
-        # 计算中间价
-        mid_price = (bid_price + ask_price) / 2
+        # 根据tick_size计算下一个有效价位
+        tick_size_float = float(self.tick_size) if self.tick_size else 0.00001
         
-        # 格式化为交易对精度
-        mid_price_formatted = float(self.format_price(mid_price))
+        # 计算买一价的下一个价位（向上一档）
+        next_bid_price = float(self.format_price(bid_price + tick_size_float))
         
-        # 检查是否存在有效中间价
-        if mid_price_formatted == bid_price or mid_price_formatted == ask_price:
-            # 没有中间价，随机选择买一或卖一
-            import random
-            trade_price = random.choice([bid_price, ask_price])
-            self.log(f"🎯 无中间价，随机选择: {trade_price:.5f} (买一:{bid_price:.5f}, 卖一:{ask_price:.5f})")
+        # 检查是否存在价格空隙
+        if next_bid_price < ask_price:
+            # 有空隙：买一价+1档 < 卖一价，可以在中间实现自成交
+            gap_prices = []
+            current_price = next_bid_price
+            while current_price < ask_price:
+                gap_prices.append(current_price)
+                current_price = float(self.format_price(current_price + tick_size_float))
+            
+            # 选择中间的价位
+            if gap_prices:
+                mid_index = len(gap_prices) // 2
+                trade_price = gap_prices[mid_index]
+                buy_price = trade_price
+                sell_price = trade_price
+                strategy_type = "自成交"
+                self.log(f"🎯 有空隙自成交: 价格={trade_price:.5f}")
+                self.log(f"📊 空隙档位: {len(gap_prices)}档 [{gap_prices[0]:.5f} ... {gap_prices[-1]:.5f}]")
+                self.log(f"📊 买一{bid_price:.5f} -> 自成交{trade_price:.5f} -> 卖一{ask_price:.5f}")
+            else:
+                # 理论上不应该到这里
+                buy_price = ask_price
+                sell_price = bid_price  
+                strategy_type = "交叉挂单"
         else:
-            # 使用中间价
-            trade_price = mid_price_formatted
-            self.log(f"🎯 中间价策略: {trade_price:.5f} (买一:{bid_price:.5f}, 卖一:{ask_price:.5f})")
+            # 无空隙：买一价+1档 >= 卖一价，买卖价位紧贴
+            buy_price = ask_price    # 买单挂卖一价，更容易成交
+            sell_price = bid_price   # 卖单挂买一价，更容易成交
+            strategy_type = "交叉挂单"
+            self.log(f"🎯 无空隙交叉挂单: 买单={buy_price:.5f}(卖一价), 卖单={sell_price:.5f}(买一价)")
+            self.log(f"📊 紧贴价位: 买一{bid_price:.5f} <-> 卖一{ask_price:.5f}")
+            self.log(f"📊 tick_size={tick_size_float:.6f}, 下一档={next_bid_price:.5f}")
         
-        self.log(f"📊 最终交易价格: {trade_price:.5f}")
+        self.log(f"✅ 策略类型: {strategy_type}")
         
-        # 同时提交买卖单
+        # 同时提交买卖单（不同价格）
         import concurrent.futures
         
         sell_order = None
@@ -531,9 +553,9 @@ class VolumeStrategy:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 # 完全同时提交买卖单（无延迟）
-                self.log(f"⚡ 同时提交买卖单...")
-                sell_future = executor.submit(self.place_sell_order, trade_price, actual_quantity)
-                buy_future = executor.submit(self.place_buy_order, trade_price, actual_quantity)
+                self.log(f"⚡ 同时提交差异化价格买卖单...")
+                sell_future = executor.submit(self.place_sell_order, sell_price, actual_quantity)
+                buy_future = executor.submit(self.place_buy_order, buy_price, actual_quantity)
                 
                 # 获取下单结果
                 try:
