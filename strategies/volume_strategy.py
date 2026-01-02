@@ -530,8 +530,8 @@ class VolumeStrategy:
         
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                # 同时提交买卖单
-                self.log(f"⏰ 同时提交买卖单...")
+                # 完全同时提交买卖单（无延迟）
+                self.log(f"⚡ 同时提交买卖单...")
                 sell_future = executor.submit(self.place_sell_order, trade_price, actual_quantity)
                 buy_future = executor.submit(self.place_buy_order, trade_price, actual_quantity)
                 
@@ -543,19 +543,13 @@ class VolumeStrategy:
                     self.log(f"❌ 下单异常: {e}", 'error')
                     return None, None
                 
-                if sell_order and buy_order:
-                    self.log(f"✅ 买卖单提交成功 - 卖单:{sell_order.get('orderId')}, 买单:{buy_order.get('orderId')}")
-                    self.log(f"⏳ 等待3秒成交...")
-                    time.sleep(3)  # 等待3秒成交
-                else:
-                    self.log(f"❌ 买卖单提交失败", 'error')
-                    return None, None
-            
             if sell_order and buy_order:
-                self.log(f"✅ 优化订单提交成功 - 卖单: {sell_order.get('orderId')}, 买单: {buy_order.get('orderId')}")
+                self.log(f"✅ 买卖单提交成功 - 卖单:{sell_order.get('orderId')}, 买单:{buy_order.get('orderId')}")
+                self.log(f"⏳ 等待3秒成交...")
+                time.sleep(3)  # 等待3秒成交
                 return sell_order, buy_order
             else:
-                self.log("❌ 优化订单提交失败")
+                self.log(f"❌ 买卖单提交失败", 'error')
                 return None, None
                 
         except Exception as e:
