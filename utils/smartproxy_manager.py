@@ -64,14 +64,16 @@ class SmartproxyManager:
             else:
                 raise ValueError(f"不支持的代理类型: {proxy_type}")
                 
-            # 测试代理连接
+            # 可选的代理连接测试（不影响代理分配）
             if self._test_proxy_connection(proxy_config):
-                self.task_proxy_cache[cache_key] = proxy_config
-                self.logger.info(f"任务 {task_id} 分配代理成功: {proxy_type} - {proxy_config['display_info']}")
-                return proxy_config
+                self.logger.info(f"任务 {task_id} 代理连接测试成功: {proxy_type}")
             else:
-                self.logger.error(f"任务 {task_id} 代理连接测试失败")
-                return None
+                self.logger.warning(f"任务 {task_id} 代理连接测试失败，但仍分配代理（可能是网络波动）")
+            
+            # 无论测试结果如何都分配代理
+            self.task_proxy_cache[cache_key] = proxy_config
+            self.logger.info(f"任务 {task_id} 分配代理成功: {proxy_type} - {proxy_config['display_info']}")
+            return proxy_config
                 
         except Exception as e:
             self.logger.error(f"为任务 {task_id} 创建代理失败: {e}")
