@@ -432,20 +432,37 @@ class VolumeStrategy:
         price_range = ask_price - bid_price
         
         if price_range <= 0.000100:
-            # 极小价差策略：错位定价，避免同时成交
-            buy_price = bid_price - 0.000100   # 买单更保守，低于买一
-            sell_price = ask_price + 0.000100  # 卖单更保守，高于卖一
-            self.log(f"🎯 极小价差策略: 买={buy_price:.5f}, 卖={sell_price:.5f}, 价差={price_range:.6f}")
+            # 极小价差策略：穿越价差，确保成交
+            import random
+            # 随机选择策略，增加成交概率
+            strategy_choice = random.random()
+            
+            if strategy_choice < 0.3:
+                # 30%概率：买单更激进
+                buy_price = ask_price - 0.000050   # 买单接近卖一价
+                sell_price = bid_price + 0.000050  # 卖单接近买一价  
+                self.log(f"🎯 极小价差-买单优先: 买={buy_price:.5f}, 卖={sell_price:.5f}")
+            elif strategy_choice < 0.6:
+                # 30%概率：卖单更激进
+                buy_price = bid_price + 0.000030   # 买单略高于买一
+                sell_price = ask_price - 0.000030  # 卖单略低于卖一
+                self.log(f"🎯 极小价差-卖单优先: 买={buy_price:.5f}, 卖={sell_price:.5f}")
+            else:
+                # 40%概率：中位价策略
+                mid_price = (bid_price + ask_price) / 2
+                buy_price = mid_price - 0.000020   # 买单略低于中位
+                sell_price = mid_price + 0.000020  # 卖单略高于中位
+                self.log(f"🎯 极小价差-中位策略: 买={buy_price:.5f}, 卖={sell_price:.5f}, 中位={mid_price:.5f}")
         else:
-            # 正常价差策略：分离定价，平衡成交率
+            # 正常价差策略：更激进的分离定价，提高成交率
             import random
             
-            # 买单偏向买一价（20%-40%），提高买单成交率
-            buy_offset = random.uniform(0.2, 0.4)
+            # 买单更激进，偏向卖一价（50%-70%），确保成交
+            buy_offset = random.uniform(0.50, 0.70)
             buy_price = bid_price + (price_range * buy_offset)
             
-            # 卖单偏向卖一价（60%-80%），提高卖单成交率
-            sell_offset = random.uniform(0.6, 0.8) 
+            # 卖单更激进，偏向买一价（30%-50%），确保成交
+            sell_offset = random.uniform(0.30, 0.50) 
             sell_price = bid_price + (price_range * sell_offset)
             
             self.log(f"🎯 平衡定价策略: 买偏移={buy_offset:.2f}, 卖偏移={sell_offset:.2f}")
