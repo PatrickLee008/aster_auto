@@ -1120,8 +1120,9 @@ class VolumeStrategy:
                 self.log("✅ 本地无待处理订单，跳过API检查")
             
             # 2. 余额检查优化：只在必要时检查
-            # 检查是否是关键轮次（每10轮或最后几轮）
+            # 检查是否是关键轮次（每10轮或最后几轮，但最后一轮不执行补单）
             is_critical_round = (round_num % 10 == 0) or (round_num >= self.rounds - 2)
+            is_final_round = (round_num == self.rounds)  # 最后一轮
             
             if is_critical_round:
                 current_balance = self.get_asset_balance()
@@ -1129,12 +1130,16 @@ class VolumeStrategy:
                 
                 self.log(f"📊 关键轮次余额检查: 当前={current_balance:.2f}, 基准={self.initial_balance:.2f}, 差值={balance_diff:+.2f}")
                 
-                # 3. 只在偏差较大时执行补正
+                # 3. 只在偏差较大时执行补正（最后一轮不执行补单）
                 if abs(balance_diff) > 0.5:  # 提高阈值避免频繁补正
-                    self.log(f"⚠️ 余额偏差较大({balance_diff:+.2f})，执行补正", "warning")
-                    correction_success = self.ensure_balance_consistency(self.initial_balance, max_attempts=2)
-                    if correction_success:
-                        self.log("✅ 余额补正完成")
+                    if is_final_round:
+                        self.log(f"⚠️ 最后一轮检测到余额偏差({balance_diff:+.2f})，但不执行补单", "warning")
+                        self.log("💡 最后一轮余额差异将在清理库存阶段处理")
+                    else:
+                        self.log(f"⚠️ 余额偏差较大({balance_diff:+.2f})，执行补正", "warning")
+                        correction_success = self.ensure_balance_consistency(self.initial_balance, max_attempts=2)
+                        if correction_success:
+                            self.log("✅ 余额补正完成")
                 else:
                     self.log(f"✅ 余额偏差可接受: {balance_diff:+.2f}")
             else:
@@ -1729,7 +1734,7 @@ class VolumeStrategy:
     
     
     def final_balance_reconciliation(self) -> bool:
-        """最终余额校验和补单 - 确保策略前后余额完全一致"""
+        """最终余额校验 - 策略结束前的检查，不执行补单"""
         try:
             self.log("检查策略执行前后的余额变化...")
             
@@ -1741,92 +1746,18 @@ class VolumeStrategy:
             self.log(f"当前余额: {current_balance:.2f}")
             self.log(f"余额差异: {balance_difference:+.2f}")
             
-            # 如果差异在容忍范围内，认为平衡
+            # 策略结束阶段只做检查，不执行补单
             if abs(balance_difference) <= 0.1:
-                self.log("✅ 余额差异在可接受范围内 (±0.1)，无需补单")
+                self.log("✅ 余额差异在可接受范围内 (±0.1)")
                 return True
-            
-            # 获取当前市场价格用于估算订单价值
-            book_data = self.get_order_book()
-            if not book_data:
-                self.log(f"❌ 无法获取市场价格，跳过最终补单", "error")
-                return False
-                
-            estimated_price = (book_data['bid_price'] + book_data['ask_price']) / 2
-            self.log(f"当前估算价格: {estimated_price:.5f}")
-            
-            # 根据余额差异决定补单方向
-            if balance_difference > 0.1:
-                # 余额增加了，说明买入多了，需要卖出
-                sell_quantity = abs(balance_difference)
-                estimated_value = sell_quantity * estimated_price
-                
-                self.log(f"💡 检测到余额增加 {balance_difference:.2f}，需要卖出补单")
-                self.log(f"卖出数量: {sell_quantity:.2f}")
-                self.log(f"估算订单价值: {estimated_value:.2f} USDT")
-                
-                if estimated_value < 5.0:
-                    self.log(f"⚠️ 补单价值不足5 USDT，取消补单", "warning")
-                    self.log("💡 微小余额差异，视为正常范围")
-                    return True
-                
-                # 执行卖出补单
-                self.log("执行最终卖出补单...")
-                result = self.place_market_sell_order(sell_quantity)
-                
-                if result == "ORDER_VALUE_TOO_SMALL":
-                    self.log("💡 补单价值不足，视为完成")
-                    return True
-                elif result and isinstance(result, dict):
-                    self.log(f"✅ 最终卖出补单成功: ID {result.get('orderId')}")
-                    self.supplement_orders += 1
-                    
-                    # 等待成交后再次检查
-                    time.sleep(2)
-                    new_balance = self.get_asset_balance()
-                    final_diff = new_balance - self.initial_balance
-                    self.log(f"补单后余额: {new_balance:.2f} (差异: {final_diff:+.2f})")
-                    
-                    return abs(final_diff) <= 0.1
-                else:
-                    self.log(f"❌ 最终卖出补单失败", "error")
-                    return False
-                    
-            elif balance_difference < -0.1:
-                # 余额减少了，说明卖出多了，需要买入
-                buy_quantity = abs(balance_difference)
-                estimated_value = buy_quantity * estimated_price
-                
-                self.log(f"💡 检测到余额减少 {abs(balance_difference):.2f}，需要买入补单")
-                self.log(f"买入数量: {buy_quantity:.2f}")
-                self.log(f"估算订单价值: {estimated_value:.2f} USDT")
-                
-                if estimated_value < 5.0:
-                    self.log(f"⚠️ 补单价值不足5 USDT，取消补单", "warning")
-                    self.log("💡 微小余额差异，视为正常范围")
-                    return True
-                
-                # 执行买入补单
-                self.log("执行最终买入补单...")
-                result = self.place_market_buy_order(buy_quantity)
-                
-                if result == "ORDER_VALUE_TOO_SMALL":
-                    self.log("💡 补单价值不足，视为完成")
-                    return True
-                elif result and isinstance(result, dict):
-                    self.log(f"✅ 最终买入补单成功: ID {result.get('orderId')}")
-                    self.supplement_orders += 1
-                    
-                    # 等待成交后再次检查
-                    time.sleep(2)
-                    new_balance = self.get_asset_balance()
-                    final_diff = new_balance - self.initial_balance
-                    self.log(f"补单后余额: {new_balance:.2f} (差异: {final_diff:+.2f})")
-                    
-                    return abs(final_diff) <= 0.1
-                else:
-                    self.log(f"❌ 最终买入补单失败", "error")
-                    return False
+            elif balance_difference > 0.1:
+                self.log(f"⚠️ 检测到余额增加 {balance_difference:.2f}")
+                self.log("💡 策略结束阶段，不执行补单，将在清理库存阶段处理")
+                return True
+            else:
+                self.log(f"⚠️ 检测到余额减少 {abs(balance_difference):.2f}")
+                self.log("💡 策略结束阶段，不执行补单，将在清理库存阶段处理")
+                return True
                     
         except Exception as e:
             self.log(f"❌ 最终余额校验异常: {e}", "error")
