@@ -2099,15 +2099,7 @@ class VolumeStrategy:
                     self.log(f"🔍 第{round_num}轮与第{round_num+1}轮之间的状态检查...")
                     self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
                 
-                # 等待间隔时间(除了最后一轮)
-                if round_num < self.rounds:
-                    self.log(f"等待 {self.interval} 秒...")
-                    # 分段睡眠，以便快速响应停止请求
-                    for _ in range(self.interval):
-                        if self.is_stop_requested():
-                            self.log(f"🛑 等待期间收到停止请求，立即结束")
-                            break
-                        time.sleep(1)
+                # 策略本身已有等待时间，无需额外间隔
             
             # API优化：批量更新延迟的统计数据
             self.log(f"\n=== 批量更新交易统计 ===")

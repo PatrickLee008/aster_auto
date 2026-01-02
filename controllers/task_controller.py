@@ -22,7 +22,7 @@ def create_task():
         # 数据类型验证
         try:
             quantity = float(data.get('quantity', 1.0)) if data.get('quantity') else 1.0
-            interval = int(data.get('interval', 60)) if data.get('interval') else 60
+            interval = 0  # 不再使用间隔时间，设置为0
             rounds = int(data.get('rounds', 1)) if data.get('rounds') else 1
             leverage = int(data.get('leverage', 1)) if data.get('leverage') else 1
         except (ValueError, TypeError) as e:
