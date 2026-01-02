@@ -265,6 +265,29 @@ class VolumeStrategy:
         except Exception as e:
             self.log(f"数量格式化失败: {e}")
             return f"{quantity:.2f}"  # 降级到默认格式
+    
+    def format_sell_quantity(self, quantity: float) -> str:
+        """专用于卖出的数量格式化：强制向下取整，避免超额卖出"""
+        if not self.step_size:
+            return f"{quantity:.1f}"  # 默认1位小数向下取整
+            
+        try:
+            step_size_float = float(self.step_size)
+            if step_size_float == 0:
+                return str(quantity)
+            
+            # 计算精度位数
+            precision = len(self.step_size.rstrip('0').split('.')[1]) if '.' in self.step_size else 0
+            
+            # 强制向下取整：floor而非round
+            import math
+            adjusted_quantity = math.floor(quantity / step_size_float) * step_size_float
+            
+            return f"{adjusted_quantity:.{precision}f}"
+            
+        except Exception as e:
+            self.log(f"卖出数量格式化失败: {e}")
+            return f"{quantity:.1f}"  # 降级到默认格式
 
     def connect(self) -> bool:
         """连接交易所"""
@@ -1352,10 +1375,21 @@ class VolumeStrategy:
                 self.log(f"❌ 无效数量: {quantity}", 'error')
                 return None
             
-            # 使用交易对的step_size进行精度标准化
-            quantity_str = self.format_quantity(quantity)
+            # 获取实际可用余额，确保不超额卖出
+            actual_balance = self.get_asset_balance()
+            safe_quantity = min(quantity, actual_balance)
+            
+            # 如果调整后数量太小，直接返回
+            if safe_quantity <= 0:
+                self.log(f"⚠️ 调整后卖出数量为0，跳过交易", 'warning')
+                return None
+            
+            # 使用专门的卖出数量格式化（向下取整）
+            quantity_str = self.format_sell_quantity(safe_quantity)
             
             self.log(f"市价卖出原始数量: {quantity:.6f}")
+            self.log(f"实际可用余额: {actual_balance:.6f}")
+            self.log(f"安全卖出数量: {safe_quantity:.6f}")
             self.log(f"市价卖出标准化数量: {quantity_str}")
             
             # 使用专用的市价单客户端
