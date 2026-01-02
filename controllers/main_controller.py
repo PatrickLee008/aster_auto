@@ -50,8 +50,12 @@ def dashboard():
 def wallets():
     """钱包管理页面"""
     try:
-        user_wallets = WalletService.get_user_wallets(current_user.id, include_inactive=True)
-        return render_template('wallets.html', wallets=user_wallets)
+        # 管理员可以查看所有钱包，普通用户只能查看自己的钱包
+        if current_user.is_admin:
+            user_wallets = WalletService.get_all_wallets(include_inactive=True)
+        else:
+            user_wallets = WalletService.get_user_wallets(current_user.id, include_inactive=True)
+        return render_template('wallets.html', wallets=user_wallets, is_admin=current_user.is_admin)
     except Exception as e:
         print(f"钱包页面加载失败: {e}")
         return render_template('wallets.html', wallets=[])

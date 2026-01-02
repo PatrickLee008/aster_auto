@@ -22,6 +22,9 @@
                         <thead>
                             <tr>
                                 <th>钱包名称</th>
+                                {% if is_admin %}
+                                <th>用户</th>
+                                {% endif %}
                                 <th>类型</th>
                                 <th>地址信息</th>
                                 <th>余额信息</th>
@@ -42,6 +45,11 @@
                                         {% endif %}
                                     </div>
                                 </td>
+                                {% if is_admin %}
+                                <td>
+                                    <span class="text-muted">{{ wallet.owner.username if wallet.owner else 'N/A' }}</span>
+                                </td>
+                                {% endif %}
                                 <td>
                                     {% if wallet.wallet_type == 'spot' %}
                                         <span class="badge bg-info">现货</span>
