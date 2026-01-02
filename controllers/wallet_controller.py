@@ -133,7 +133,11 @@ def update_wallet(wallet_id):
 def delete_wallet(wallet_id):
     """删除钱包API"""
     try:
-        success, message = WalletService.delete_wallet(wallet_id, current_user.id)
+        # 管理员可以删除任意钱包，普通用户只能删除自己的钱包
+        if current_user.is_admin:
+            success, message = WalletService.delete_wallet(wallet_id, None)
+        else:
+            success, message = WalletService.delete_wallet(wallet_id, current_user.id)
         
         return jsonify({
             'success': success,
@@ -153,7 +157,11 @@ def get_wallets():
     """获取钱包列表API"""
     try:
         include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
-        wallets = WalletService.get_user_wallets(current_user.id, include_inactive)
+        # 管理员可以看到所有钱包，普通用户只能看到自己的钱包
+        if current_user.is_admin:
+            wallets = WalletService.get_all_wallets(include_inactive)
+        else:
+            wallets = WalletService.get_user_wallets(current_user.id, include_inactive)
         
         wallet_list = []
         for wallet in wallets:
@@ -186,7 +194,11 @@ def get_wallets():
 def get_wallet(wallet_id):
     """获取单个钱包信息API"""
     try:
-        wallet = WalletService.get_wallet_by_id(wallet_id, current_user.id)
+        # 管理员可以查看任意钱包，普通用户只能查看自己的钱包
+        if current_user.is_admin:
+            wallet = WalletService.get_wallet_by_id(wallet_id, None)  # None表示不限制用户
+        else:
+            wallet = WalletService.get_wallet_by_id(wallet_id, current_user.id)
         
         if not wallet:
             return jsonify({

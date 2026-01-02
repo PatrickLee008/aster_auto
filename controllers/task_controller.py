@@ -186,7 +186,11 @@ def update_task(task_id):
 def delete_task(task_id):
     """删除任务API"""
     try:
-        success, message = TaskService.delete_task(task_id, current_user.id)
+        # 管理员可以删除任意任务，普通用户只能删除自己的任务
+        if current_user.is_admin:
+            success, message = TaskService.delete_task(task_id, None)
+        else:
+            success, message = TaskService.delete_task(task_id, current_user.id)
         
         return jsonify({
             'success': success,
@@ -205,7 +209,11 @@ def delete_task(task_id):
 def get_tasks():
     """获取任务列表API"""
     try:
-        tasks = TaskService.get_user_tasks(current_user.id)
+        # 管理员可以看到所有任务，普通用户只能看到自己的任务
+        if current_user.is_admin:
+            tasks = TaskService.get_all_tasks()
+        else:
+            tasks = TaskService.get_user_tasks(current_user.id)
         
         task_list = []
         for task in tasks:
@@ -255,7 +263,11 @@ def get_tasks():
 def get_task(task_id):
     """获取单个任务信息API"""
     try:
-        task = TaskService.get_task_by_id(task_id, current_user.id)
+        # 管理员可以查看任意任务，普通用户只能查看自己的任务
+        if current_user.is_admin:
+            task = TaskService.get_task_by_id(task_id, None)  # None表示不限制用户
+        else:
+            task = TaskService.get_task_by_id(task_id, current_user.id)
         
         if not task:
             return jsonify({

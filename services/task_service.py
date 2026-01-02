@@ -242,7 +242,7 @@ class TaskService:
             return False, f"恢复任务失败: {str(e)}"
     
     @staticmethod
-    def delete_task(task_id: int, user_id: int) -> Tuple[bool, str]:
+    def delete_task(task_id: int, user_id: int = None) -> Tuple[bool, str]:
         """
         删除任务
         
@@ -250,7 +250,13 @@ class TaskService:
             (success, message)
         """
         try:
-            task = Task.query.filter_by(id=task_id, user_id=user_id).first()
+            if user_id is None:
+                # 管理员权限，可以删除任意任务
+                task = Task.query.filter_by(id=task_id).first()
+            else:
+                # 普通用户权限，只能删除自己的任务
+                task = Task.query.filter_by(id=task_id, user_id=user_id).first()
+                
             if not task:
                 return False, "任务不存在"
             
@@ -394,10 +400,15 @@ class TaskService:
             return []
     
     @staticmethod
-    def get_task_by_id(task_id: int, user_id: int) -> Optional[Task]:
+    def get_task_by_id(task_id: int, user_id: int = None) -> Optional[Task]:
         """根据ID获取任务"""
         try:
-            return Task.query.filter_by(id=task_id, user_id=user_id).first()
+            if user_id is None:
+                # 管理员权限，可以查看任意任务
+                return Task.query.filter_by(id=task_id).first()
+            else:
+                # 普通用户权限，只能查看自己的任务
+                return Task.query.filter_by(id=task_id, user_id=user_id).first()
         except Exception as e:
             print(f"获取任务失败: {e}")
             return None

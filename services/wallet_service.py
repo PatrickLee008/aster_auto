@@ -181,7 +181,7 @@ class WalletService:
             return False, f"更新钱包失败: {str(e)}"
     
     @staticmethod
-    def delete_wallet(wallet_id: int, user_id: int) -> Tuple[bool, str]:
+    def delete_wallet(wallet_id: int, user_id: int = None) -> Tuple[bool, str]:
         """
         删除钱包及其关联的任务
         
@@ -191,7 +191,13 @@ class WalletService:
         try:
             from models.task import Task
             
-            wallet = Wallet.query.filter_by(id=wallet_id, user_id=user_id).first()
+            if user_id is None:
+                # 管理员权限，可以删除任意钱包
+                wallet = Wallet.query.filter_by(id=wallet_id).first()
+            else:
+                # 普通用户权限，只能删除自己的钱包
+                wallet = Wallet.query.filter_by(id=wallet_id, user_id=user_id).first()
+                
             if not wallet:
                 return False, "钱包不存在"
             
@@ -512,10 +518,15 @@ class WalletService:
             return []
     
     @staticmethod
-    def get_wallet_by_id(wallet_id: int, user_id: int) -> Optional[Wallet]:
+    def get_wallet_by_id(wallet_id: int, user_id: int = None) -> Optional[Wallet]:
         """根据ID获取钱包"""
         try:
-            return Wallet.query.filter_by(id=wallet_id, user_id=user_id).first()
+            if user_id is None:
+                # 管理员权限，可以查看任意钱包
+                return Wallet.query.filter_by(id=wallet_id).first()
+            else:
+                # 普通用户权限，只能查看自己的钱包
+                return Wallet.query.filter_by(id=wallet_id, user_id=user_id).first()
         except Exception as e:
             print(f"获取钱包失败: {e}")
             return None
