@@ -424,69 +424,6 @@ class VolumeStrategy:
             return None
     
     
-    def generate_balanced_trade_prices(self, bid_price: float, ask_price: float) -> tuple:
-        """
-        智能平衡定价策略 - 解决买卖不平衡问题
-        返回: (buy_price, sell_price)
-        """
-        price_range = ask_price - bid_price
-        
-        if price_range <= 0.000100:
-            # 极小价差策略：穿越价差，确保成交
-            import random
-            # 随机选择策略，增加成交概率
-            strategy_choice = random.random()
-            
-            if strategy_choice < 0.3:
-                # 30%概率：买单更激进
-                buy_price = ask_price - 0.000050   # 买单接近卖一价
-                sell_price = bid_price + 0.000050  # 卖单接近买一价  
-                self.log(f"🎯 极小价差-买单优先: 买={buy_price:.5f}, 卖={sell_price:.5f}")
-            elif strategy_choice < 0.6:
-                # 30%概率：卖单更激进
-                buy_price = bid_price + 0.000030   # 买单略高于买一
-                sell_price = ask_price - 0.000030  # 卖单略低于卖一
-                self.log(f"🎯 极小价差-卖单优先: 买={buy_price:.5f}, 卖={sell_price:.5f}")
-            else:
-                # 40%概率：中位价策略
-                mid_price = (bid_price + ask_price) / 2
-                buy_price = mid_price - 0.000020   # 买单略低于中位
-                sell_price = mid_price + 0.000020  # 卖单略高于中位
-                self.log(f"🎯 极小价差-中位策略: 买={buy_price:.5f}, 卖={sell_price:.5f}, 中位={mid_price:.5f}")
-        else:
-            # 正常价差策略：更激进的分离定价，提高成交率
-            import random
-            
-            # 买单更激进，偏向卖一价（50%-70%），确保成交
-            buy_offset = random.uniform(0.50, 0.70)
-            buy_price = bid_price + (price_range * buy_offset)
-            
-            # 卖单更激进，偏向买一价（30%-50%），确保成交
-            sell_offset = random.uniform(0.30, 0.50) 
-            sell_price = bid_price + (price_range * sell_offset)
-            
-            self.log(f"🎯 平衡定价策略: 买偏移={buy_offset:.2f}, 卖偏移={sell_offset:.2f}")
-            self.log(f"   买价={buy_price:.5f} (距买一: {(buy_price-bid_price)*100000:.1f}ticks)")
-            self.log(f"   卖价={sell_price:.5f} (距卖一: {(ask_price-sell_price)*100000:.1f}ticks)")
-        
-        # 格式化价格
-        buy_price = float(self.format_price(buy_price))
-        sell_price = float(self.format_price(sell_price))
-        
-        # 检查订单价值（确保≥5 USDT）
-        buy_value = buy_price * float(self.quantity)
-        sell_value = sell_price * float(self.quantity)
-        
-        if buy_value < 5.0:
-            min_buy_price = 5.0 / float(self.quantity)
-            buy_price = max(buy_price, round(min_buy_price, 5))
-            
-        if sell_value < 5.0:
-            min_sell_price = 5.0 / float(self.quantity)
-            sell_price = max(sell_price, round(min_sell_price, 5))
-        
-        self.log(f"✅ 最终定价: 买单={buy_price:.5f}, 卖单={sell_price:.5f}")
-        return (buy_price, sell_price)
     
     def generate_optimized_trade_price(self, bid_price: float, ask_price: float, strategy: str = 'narrow_spread') -> float:
         """优化的交易价格生成策略"""
@@ -562,21 +499,25 @@ class VolumeStrategy:
         spread = book_data['ask_price'] - book_data['bid_price']
         self.log(f"当前价差: {spread:.6f}")
         
-        # 使用智能平衡定价策略
-        buy_price, sell_price = self.generate_balanced_trade_prices(
+        # 根据价差选择策略
+        if spread <= 0.000200:  # 极小价差
+            strategy = 'narrow_spread'
+            delay_ms = 5  # 5ms延迟
+        elif spread <= 0.001000:  # 中等价差
+            strategy = 'adaptive'
+            delay_ms = 8  # 8ms延迟
+        else:  # 价差较大，使用中位价策略
+            strategy = 'mid_price'
+            delay_ms = 10  # 10ms延迟
+        
+        # 生成优化价格
+        trade_price = self.generate_optimized_trade_price(
             book_data['bid_price'], 
-            book_data['ask_price']
+            book_data['ask_price'], 
+            strategy
         )
         
-        # 根据价差调整延迟
-        if spread <= 0.000100:
-            delay_ms = 5   # 极小价差，快速下单
-        elif spread <= 0.000300:
-            delay_ms = 8   # 中等价差
-        else:
-            delay_ms = 10  # 大价差，稍微延迟
-        
-        self.log(f"🚀 智能平衡策略: 买价={buy_price:.5f}, 卖价={sell_price:.5f}, 延迟={delay_ms}ms")
+        self.log(f"🎯 优化策略执行 - 策略: {strategy}, 价格: {trade_price:.5f}, 延迟: {delay_ms}ms")
         
         # 执行优化下单
         import concurrent.futures
@@ -586,14 +527,14 @@ class VolumeStrategy:
         
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                # 提交卖单（使用卖单专用价格）
-                sell_future = executor.submit(self.place_sell_order, sell_price, actual_quantity)
+                # 提交卖单
+                sell_future = executor.submit(self.place_sell_order, trade_price, actual_quantity)
                 
                 # 优化延迟
                 time.sleep(delay_ms / 1000.0)
                 
-                # 提交买单（使用买单专用价格）
-                buy_future = executor.submit(self.place_buy_order, buy_price, actual_quantity)
+                # 提交买单
+                buy_future = executor.submit(self.place_buy_order, trade_price, actual_quantity)
                 
                 # 获取结果
                 try:
