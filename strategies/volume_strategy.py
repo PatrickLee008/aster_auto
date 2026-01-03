@@ -517,6 +517,9 @@ class VolumeStrategy:
             # 计算买一价的下一个价位（向上一档）
             next_bid_price = float(self.format_price(bid_price + tick_size_float))
             
+            # 显示当前订单簿信息
+            self.log(f"📊 当前订单簿: 买一={bid_price:.6f}, 卖一={ask_price:.6f}, 价差={spread:.6f}")
+            
             # 检查是否存在价格空隙
             if next_bid_price < ask_price:
                 # 有空隙：买一价+1档 < 卖一价，可以在中间实现自成交
@@ -533,7 +536,12 @@ class VolumeStrategy:
                     buy_price = trade_price
                     sell_price = trade_price
                     strategy_type = "自成交"
-                    self.log(f"🎯 发现价格空隙！自成交: {trade_price:.5f} ({len(gap_prices)}档空隙)")
+                    self.log(f"✅ 发现价格空隙！")
+                    self.log(f"📈 买一价: {bid_price:.6f}")
+                    self.log(f"📉 卖一价: {ask_price:.6f}")
+                    self.log(f"🎯 选择自成交价格: {trade_price:.6f} (第{mid_index+1}/{len(gap_prices)}档空隙)")
+                    self.log(f"💰 买单价格: {buy_price:.6f}")
+                    self.log(f"💰 卖单价格: {sell_price:.6f}")
                     break  # 找到空隙，退出等待循环
                 else:
                     # 理论上不应该到这里，但仍然等待
@@ -542,7 +550,7 @@ class VolumeStrategy:
                     continue
             else:
                 # 无空隙：买一价+1档 >= 卖一价，买卖价位紧贴
-                self.log(f"⏳ 无价格空隙(买一+1档:{next_bid_price:.5f} >= 卖一:{ask_price:.5f})，等待2秒后重新检查")
+                self.log(f"⏳ 无价格空隙(买一+1档:{next_bid_price:.6f} >= 卖一:{ask_price:.6f})，等待2秒后重新检查")
                 time.sleep(2)
                 continue  # 继续等待空隙出现
         
@@ -579,7 +587,9 @@ class VolumeStrategy:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 # 完全同时提交买卖单（无延迟）
-                self.log(f"⚡ 提交订单: 买单{buy_value:.2f}U, 卖单{sell_value:.2f}U")
+                self.log(f"⚡ 提交订单:")
+                self.log(f"  💰 买单: 价格={buy_price:.6f}, 数量={actual_quantity:.1f}, 价值={buy_value:.2f}U")
+                self.log(f"  💰 卖单: 价格={sell_price:.6f}, 数量={actual_quantity:.1f}, 价值={sell_value:.2f}U")
                 sell_future = executor.submit(self.place_sell_order, sell_price, actual_quantity)
                 buy_future = executor.submit(self.place_buy_order, buy_price, actual_quantity)
                 
