@@ -565,15 +565,18 @@ class VolumeStrategy:
             
         # 检查USDT余额是否足够支持买单
         try:
-            usdt_balance = self.client.get_balance('USDT')
+            usdt_balance = self.get_usdt_balance()
+            self.log(f"💰 当前USDT余额: {usdt_balance:.2f}U")
             if usdt_balance < buy_value:
                 error_msg = f"USDT余额不足: 需要{buy_value:.2f}U，实际{usdt_balance:.2f}U，缺少{buy_value - usdt_balance:.2f}U"
-                self.log(f"💰 {error_msg}")
+                self.log(f"❌ {error_msg}")
                 self.log(f"💡 建议：增加USDT余额或减少交易数量")
                 # 记录详细错误信息供任务状态显示
                 if hasattr(self, 'last_error'):
                     self.last_error = error_msg
                 return None, None
+            else:
+                self.log(f"✅ USDT余额充足，可以支持买单")
         except Exception as e:
             self.log(f"⚠️ 无法检查USDT余额: {e}")
             # 继续执行，让API返回具体错误
