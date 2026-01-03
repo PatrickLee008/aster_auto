@@ -488,57 +488,87 @@ class VolumeStrategy:
     
     
     def execute_optimized_round(self, actual_quantity: float) -> tuple:
-        """执行优化的交易轮次"""
+        """执行优化的交易轮次 - 只在有价格空隙时交易"""
         
-        # 获取订单簿
-        book_data = self.get_order_book()
-        if not book_data:
+        # 持续等待价格空隙出现
+        while True:
+            # 检查是否收到停止请求
+            if self.is_stop_requested():
+                self.log(f"🛑 收到停止请求，停止等待价格空隙")
+                return None, None
+            
+            # 获取订单簿
+            book_data = self.get_order_book()
+            if not book_data:
+                self.log(f"⚠️ 无法获取订单簿，等待2秒后重试")
+                time.sleep(2)
+                continue
+                
+            # 计算价差
+            spread = book_data['ask_price'] - book_data['bid_price']
+            
+            # 基于订单簿空隙的自成交策略
+            bid_price = book_data['bid_price']
+            ask_price = book_data['ask_price']
+            
+            # 根据tick_size计算下一个有效价位
+            tick_size_float = float(self.tick_size) if self.tick_size else 0.00001
+            
+            # 计算买一价的下一个价位（向上一档）
+            next_bid_price = float(self.format_price(bid_price + tick_size_float))
+            
+            # 检查是否存在价格空隙
+            if next_bid_price < ask_price:
+                # 有空隙：买一价+1档 < 卖一价，可以在中间实现自成交
+                gap_prices = []
+                current_price = next_bid_price
+                while current_price < ask_price:
+                    gap_prices.append(current_price)
+                    current_price = float(self.format_price(current_price + tick_size_float))
+                
+                # 选择中间的价位
+                if gap_prices:
+                    mid_index = len(gap_prices) // 2
+                    trade_price = gap_prices[mid_index]
+                    buy_price = trade_price
+                    sell_price = trade_price
+                    strategy_type = "自成交"
+                    self.log(f"🎯 发现价格空隙！自成交: {trade_price:.5f} ({len(gap_prices)}档空隙)")
+                    break  # 找到空隙，退出等待循环
+                else:
+                    # 理论上不应该到这里，但仍然等待
+                    self.log(f"⚠️ 检测到空隙但无有效价位，继续等待...")
+                    time.sleep(2)
+                    continue
+            else:
+                # 无空隙：买一价+1档 >= 卖一价，买卖价位紧贴
+                self.log(f"⏳ 无价格空隙(买一+1档:{next_bid_price:.5f} >= 卖一:{ask_price:.5f})，等待2秒后重新检查")
+                time.sleep(2)
+                continue  # 继续等待空隙出现
+        
+        # 检查订单价值是否满足最小要求（5 USDT）
+        buy_value = buy_price * actual_quantity
+        sell_value = sell_price * actual_quantity
+        
+        if buy_value < 5.0 or sell_value < 5.0:
+            self.log(f"❌ 订单价值不足5 USDT: 买单={buy_value:.2f}, 卖单={sell_value:.2f}")
+            self.log(f"📊 价格: 买={buy_price:.5f}, 卖={sell_price:.5f}, 数量={actual_quantity:.2f}")
             return None, None
             
-        # 计算价差
-        spread = book_data['ask_price'] - book_data['bid_price']
-        self.log(f"当前价差: {spread:.6f}")
-        
-        # 基于订单簿空隙的自成交策略
-        bid_price = book_data['bid_price']
-        ask_price = book_data['ask_price']
-        
-        # 根据tick_size计算下一个有效价位
-        tick_size_float = float(self.tick_size) if self.tick_size else 0.00001
-        
-        # 计算买一价的下一个价位（向上一档）
-        next_bid_price = float(self.format_price(bid_price + tick_size_float))
-        
-        # 检查是否存在价格空隙
-        if next_bid_price < ask_price:
-            # 有空隙：买一价+1档 < 卖一价，可以在中间实现自成交
-            gap_prices = []
-            current_price = next_bid_price
-            while current_price < ask_price:
-                gap_prices.append(current_price)
-                current_price = float(self.format_price(current_price + tick_size_float))
-            
-            # 选择中间的价位
-            if gap_prices:
-                mid_index = len(gap_prices) // 2
-                trade_price = gap_prices[mid_index]
-                buy_price = trade_price
-                sell_price = trade_price
-                strategy_type = "自成交"
-                self.log(f"🎯 自成交: {trade_price:.5f} ({len(gap_prices)}档空隙)")
-            else:
-                # 理论上不应该到这里
-                buy_price = ask_price
-                sell_price = bid_price  
-                strategy_type = "交叉挂单"
-        else:
-            # 无空隙：买一价+1档 >= 卖一价，买卖价位紧贴
-            buy_price = ask_price    # 买单挂卖一价，更容易成交
-            sell_price = bid_price   # 卖单挂买一价，更容易成交
-            strategy_type = "交叉挂单"
-            self.log(f"🎯 交叉挂单: 买{buy_price:.5f}/卖{sell_price:.5f}")
-        
-        # 立即执行，减少延迟
+        # 检查USDT余额是否足够支持买单
+        try:
+            usdt_balance = self.client.get_balance('USDT')
+            if usdt_balance < buy_value:
+                error_msg = f"USDT余额不足: 需要{buy_value:.2f}U，实际{usdt_balance:.2f}U，缺少{buy_value - usdt_balance:.2f}U"
+                self.log(f"💰 {error_msg}")
+                self.log(f"💡 建议：增加USDT余额或减少交易数量")
+                # 记录详细错误信息供任务状态显示
+                if hasattr(self, 'last_error'):
+                    self.last_error = error_msg
+                return None, None
+        except Exception as e:
+            self.log(f"⚠️ 无法检查USDT余额: {e}")
+            # 继续执行，让API返回具体错误
         
         # 同时提交买卖单（不同价格）
         import concurrent.futures
@@ -549,7 +579,7 @@ class VolumeStrategy:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 # 完全同时提交买卖单（无延迟）
-                self.log(f"⚡ 同时提交差异化价格买卖单...")
+                self.log(f"⚡ 提交订单: 买单{buy_value:.2f}U, 卖单{sell_value:.2f}U")
                 sell_future = executor.submit(self.place_sell_order, sell_price, actual_quantity)
                 buy_future = executor.submit(self.place_buy_order, buy_price, actual_quantity)
                 

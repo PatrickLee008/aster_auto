@@ -100,6 +100,12 @@
                                     {% if task.process_id %}
                                     <br><small class="text-muted">PID: {{ task.process_id }}</small>
                                     {% endif %}
+                                    {% if task.last_error %}
+                                    <br><small class="text-danger" title="{{ task.last_error }}">
+                                        <i class="fas fa-info-circle"></i> 
+                                        {{ task.last_error[:50] + '...' if task.last_error|length > 50 else task.last_error }}
+                                    </small>
+                                    {% endif %}
                                 </td>
                                 <td>
                                     <div class="small">
