@@ -10,6 +10,8 @@ from typing import Optional, Dict, Any
 import sys
 import os
 
+import self
+
 # 添加父目录到路径以导入客户端
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from simple_trading_client import SimpleTradingClient
@@ -423,70 +425,6 @@ class VolumeStrategy:
             self.log(f"获取订单薄失败: {e}", 'error')
             return None
     
-    
-    
-    def generate_optimized_trade_price(self, bid_price: float, ask_price: float, strategy: str = 'narrow_spread') -> float:
-        """优化的交易价格生成策略"""
-        
-        if bid_price >= ask_price:
-            # 无价差时，使用买一价格
-            base_price = bid_price
-        else:
-            price_range = ask_price - bid_price
-            
-            if strategy == 'narrow_spread':
-                # 策略1: 窄价差策略 - 处理极小价差情况
-                if price_range <= 0.000100:  # 价差只有1个tick或更小
-                    # 随机选择买一价或略低于卖一价
-                    if random.choice([True, False]):
-                        base_price = bid_price  # 使用买一价
-                        self.log(f"使用窄价差策略(买一价)，价差: {price_range:.6f}")
-                    else:
-                        base_price = bid_price + 0.000100  # 比买一高一个tick
-                        self.log(f"使用窄价差策略(买一+1tick)，价差: {price_range:.6f}")
-                else:
-                    # 正常价差，使用中位附近
-                    offset = random.uniform(0.45, 0.55)
-                    base_price = bid_price + (price_range * offset)
-                    self.log(f"使用窄价差策略，偏移: {offset:.2f}")
-                
-            elif strategy == 'mid_price':
-                # 策略2: 中位价策略 - 完全中位价
-                base_price = (bid_price + ask_price) / 2
-                self.log(f"使用中位价策略")
-                
-            elif strategy == 'adaptive':
-                # 策略3: 自适应策略 - 根据价差大小调整
-                if price_range <= 0.000100:  # 价差极小，只有1个tick，随机选择买一或卖一
-                    if random.choice([True, False]):
-                        base_price = bid_price  # 选择买一价
-                        self.log(f"使用自适应策略(买一价)，价差: {price_range:.6f}")
-                    else:
-                        base_price = ask_price - 0.000100  # 选择比卖一低一个tick
-                        self.log(f"使用自适应策略(比卖一低)，价差: {price_range:.6f}")
-                else:
-                    offset = random.uniform(0.40, 0.60)  # 中位附近
-                    base_price = bid_price + (price_range * offset)
-                    self.log(f"使用自适应策略，价差: {price_range:.6f}, 偏移: {offset:.2f}")
-            else:
-                # 默认策略 - 中位附近
-                offset = random.uniform(0.45, 0.55)
-                base_price = bid_price + (price_range * offset)
-        
-        # 格式化价格
-        formatted_price = self.format_price(base_price)
-        trade_price = float(formatted_price)
-        
-        # 检查订单价值
-        order_value = trade_price * float(self.quantity)
-        if order_value < 5.0:
-            min_price = 5.0 / float(self.quantity)
-            trade_price = max(trade_price, round(min_price, 5))
-        
-        self.log(f"优化价格生成 [{strategy}]: {trade_price:.5f}, 买一: {bid_price:.5f}, 卖一: {ask_price:.5f}")
-        return trade_price
-    
-    
     def execute_optimized_round(self, actual_quantity: float) -> tuple:
         """执行优化的交易轮次 - 只在有价格空隙时交易"""
         
@@ -636,7 +574,7 @@ class VolumeStrategy:
                 order_type='LIMIT',
                 quantity=quantity_str,
                 price=price_str,
-                time_in_force='GTC'
+                time_in_force='HIDDEN'
             )
             
             if result:
@@ -685,7 +623,7 @@ class VolumeStrategy:
                 order_type='LIMIT',
                 quantity=quantity_str,
                 price=price_str,
-                time_in_force='GTC'
+                time_in_force='HIDDEN'
             )
             
             if result:
