@@ -41,7 +41,7 @@ class VolumeStrategy:
         self.logger = None  # 日志记录器
         
         # 风险控制参数 - 优化时间参数提高成交率
-        self.order_check_timeout = 2.0  # 订单成交检查时间(改为2秒，给买卖订单更多成交时间)
+        self.order_check_timeout = 1.0  # 订单成交检查时间(改为2秒，给买卖订单更多成交时间)
         self.max_price_deviation = 0.01  # 最大价格偏差(1%)
         
         # API优化参数 - 方案3智能优化
@@ -545,7 +545,7 @@ class VolumeStrategy:
             if sell_order and buy_order:
                 self.log(f"✅ 买卖单提交成功 - 卖单:{sell_order.get('orderId')}, 买单:{buy_order.get('orderId')}")
                 self.log(f"⏳ 等待3秒成交...")
-                time.sleep(3)  # 等待3秒成交
+                time.sleep(1)  # 等待3秒成交
                 return sell_order, buy_order
             else:
                 self.log(f"❌ 买卖单提交失败", 'error')
