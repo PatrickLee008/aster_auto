@@ -6,6 +6,7 @@
 import sys
 import os
 import time
+import logging
 from datetime import datetime
 
 # 添加项目根目录到路径
@@ -13,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app import create_app
 from models import Task
+from models.base import db
 from services import WalletService
 from utils import TaskLogger
 
@@ -24,18 +26,37 @@ def run_task(task_id: int):
     with app.app_context():
         try:
             # 获取任务信息
-            task = Task.query.get(task_id)
+            task = db.session.get(Task, task_id)
             if not task:
                 print(f"任务 {task_id} 不存在")
                 return
             
-            # 创建日志记录器
-            logger = TaskLogger(task.name)
-            logger.log_task_start(task.name, task.id, task.get_trading_parameters())
+            # 创建日志记录器（直接使用 logging.Logger，不重复调用 log_task_start）
+            logger_name = f"task_{task.id}"
+            logger = logging.getLogger(logger_name)
+            
+            # 如果 logger 还没有配置，说明是首次创建，需要配置
+            if not logger.handlers:
+                logger.setLevel(logging.INFO)
+                
+                # 创建文件处理器
+                from utils import TaskLogger
+                task_logger_manager = TaskLogger()
+                log_file = task_logger_manager.get_log_file_path(task.name)
+                file_handler = logging.FileHandler(log_file, encoding='utf-8')
+                file_handler.setLevel(logging.INFO)
+                
+                # 创建格式器
+                formatter = logging.Formatter(
+                    '%(asctime)s - %(levelname)s - %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S'
+                )
+                file_handler.setFormatter(formatter)
+                logger.addHandler(file_handler)
             
             # 获取策略信息
             from models import Strategy
-            strategy = Strategy.query.get(task.strategy_id)
+            strategy = db.session.get(Strategy, task.strategy_id)
             if not strategy:
                 logger.error(f"策略 {task.strategy_id} 不存在")
                 task.update_status('error', error_message="策略不存在")
@@ -149,7 +170,10 @@ def run_task(task_id: int):
                 logger.error("任务执行失败")
                 task.update_status('error', error_message="策略执行失败")
             
-            logger.log_task_end(task.name, task.id)
+            # 关闭日志处理器
+            for handler in logger.handlers[:]:
+                handler.close()
+                logger.removeHandler(handler)
             
         except Exception as e:
             print(f"任务执行异常: {e}")
@@ -157,7 +181,7 @@ def run_task(task_id: int):
             traceback.print_exc()
             
             try:
-                task = Task.query.get(task_id)
+                task = db.session.get(Task, task_id)
                 if task:
                     task.update_status('error', error_message=str(e))
             except:
