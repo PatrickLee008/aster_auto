@@ -25,7 +25,19 @@ def login():
             return render_template('auth/login.html')
         
         # 查找用户
-        user = User.query.filter_by(username=username, is_active=True).first()
+        print(f"[DEBUG LOGIN] 尝试登录用户: {username}")
+        
+        # 查找用户（允许禁用用户登录）
+        user = User.query.filter_by(username=username).first()
+        
+        print(f"[DEBUG LOGIN] 找到用户: {user is not None}")
+        
+        if user:
+            print(f"[DEBUG LOGIN] 用户ID: {user.id}, 昵称: {user.nickname}")
+            print(f"[DEBUG LOGIN] 用户状态: is_active={user.is_active}")
+            print(f"[DEBUG LOGIN] 密码哈希: {user.password_hash[:50]}...")
+            password_match = user.check_password(password)
+            print(f"[DEBUG LOGIN] 密码匹配: {password_match}")
         
         if user and user.check_password(password):
             # 登录成功
@@ -39,9 +51,17 @@ def login():
             next_page = request.args.get('next')
             return redirect(next_page) if next_page else redirect(url_for('main.index'))
         else:
+            # 提供更详细的错误信息
+            error_message = '用户名或密码错误'
+            
+            if not user:
+                error_message = '用户名或密码错误'
+            elif user:
+                error_message = '密码错误'
+            
             if request.is_json:
-                return jsonify({'success': False, 'message': '用户名或密码错误'})
-            flash('用户名或密码错误', 'error')
+                return jsonify({'success': False, 'message': error_message})
+            flash(error_message, 'error')
     
     return render_template('auth/login.html')
 

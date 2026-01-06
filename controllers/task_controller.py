@@ -232,6 +232,11 @@ def get_tasks():
                 'created_at': task.created_at.isoformat(),
                 'updated_at': task.updated_at.isoformat(),
                 'last_error': task.last_error,
+                'user': {
+                    'id': task.creator.id,
+                    'username': task.creator.username,
+                    'nickname': task.creator.nickname
+                } if current_user.is_admin else None,
                 'wallet': {
                     'id': task.wallet.id,
                     'name': task.wallet.name,
@@ -292,6 +297,11 @@ def get_task(task_id):
             'created_at': task.created_at.isoformat(),
             'updated_at': task.updated_at.isoformat(),
             'last_error': task.last_error,
+            'user': {
+                'id': task.creator.id,
+                'username': task.creator.username,
+                'nickname': task.creator.nickname
+            } if current_user.is_admin else None,
             'wallet': {
                 'id': task.wallet.id,
                 'name': task.wallet.name,

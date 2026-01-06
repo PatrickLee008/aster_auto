@@ -14,6 +14,19 @@
 {% endblock %}
 
 {% block content %}
+<!-- 用户状态警告 -->
+{% if not current_user.account_enabled %}
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="alert alert-warning alert-dismissible fade show" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <strong>账户已被禁用</strong> - 您可以查看数据，但无法启动任务。如需启动任务，请联系管理员启用您的账户。
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- 统计卡片 -->
 <div class="row mb-4">
     <div class="col-md-3 mb-3">
@@ -21,7 +34,7 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between">
                     <div>
-                        <h5 class="card-title">总钱包数</h5>
+                        <h5 class="card-title">{% if current_user.is_admin %}系统总钱包{% else %}总钱包数{% endif %}</h5>
                         <h2 class="mb-0">{{ stats.total_wallets }}</h2>
                     </div>
                     <div class="align-self-center">
@@ -37,7 +50,7 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between">
                     <div>
-                        <h5 class="card-title">活跃钱包</h5>
+                        <h5 class="card-title">{% if current_user.is_admin %}系统活跃钱包{% else %}活跃钱包{% endif %}</h5>
                         <h2 class="mb-0">{{ stats.active_wallets }}</h2>
                     </div>
                     <div class="align-self-center">
@@ -53,7 +66,7 @@
             <div class="card-body">
                 <div class="d-flex justify-content-between">
                     <div>
-                        <h5 class="card-title">总任务数</h5>
+                        <h5 class="card-title">{% if current_user.is_admin %}系统总任务{% else %}总任务数{% endif %}</h5>
                         <h2 class="mb-0">{{ stats.total_tasks }}</h2>
                     </div>
                     <div class="align-self-center">

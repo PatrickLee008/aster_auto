@@ -39,6 +39,10 @@ class TaskService:
             if not user:
                 return False, "用户不存在", None
             
+            # 检查用户是否被禁用
+            if not user.account_enabled:
+                return False, "您的账户已被禁用，无法创建任务", None
+            
             # 检查任务数量限制
             if not user.can_create_task():
                 return False, f"任务数量已达上限({user.max_tasks})，请联系管理员提升配额", None
@@ -115,6 +119,11 @@ class TaskService:
             
             if not task:
                 return False, "任务不存在"
+            
+            # 检查用户是否被禁用
+            user = User.query.get(task.user_id)
+            if not user or not user.account_enabled:
+                return False, "用户已被禁用，无法启动任务"
             
             if task.status == 'running':
                 return False, "任务已在运行中"

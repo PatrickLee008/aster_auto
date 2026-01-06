@@ -19,7 +19,7 @@ class User(UserMixin, db.Model, BaseModel):
     password_hash = db.Column(db.String(255), nullable=False, comment='密码哈希')
     nickname = db.Column(db.String(100), nullable=False, comment='昵称')
     max_tasks = db.Column(db.Integer, default=5, comment='可创建任务数')
-    is_active = db.Column(db.Boolean, default=True, comment='是否启用')
+    account_enabled = db.Column(db.Boolean, default=True, comment='是否启用', name='is_active')  # 数据库字段名保持is_active
     is_admin = db.Column(db.Boolean, default=False, comment='是否管理员')
     created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
     last_login = db.Column(db.DateTime, comment='最后登录时间')
@@ -28,9 +28,23 @@ class User(UserMixin, db.Model, BaseModel):
     wallets = db.relationship('Wallet', backref='owner', lazy=True, cascade='all, delete-orphan')
     tasks = db.relationship('Task', backref='creator', lazy=True, cascade='all, delete-orphan')
     
+    @property
+    def is_active(self):
+        """
+        覆盖Flask-Login的is_active属性
+        始终返回True，让所有用户都可以登录
+        实际的启用/禁用状态由account_enabled字段控制，用于限制任务操作
+        """
+        return True
+    
+    @property  
+    def is_account_enabled(self):
+        """获取账户启用状态（用于业务逻辑）"""
+        return self.account_enabled
+    
     def set_password(self, password):
         """设置密码"""
-        self.password_hash = generate_password_hash(password)
+        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
     
     def check_password(self, password):
         """验证密码"""
@@ -67,7 +81,7 @@ class User(UserMixin, db.Model, BaseModel):
             'max_tasks': self.max_tasks,
             'task_count': self.get_task_count(),
             'remaining_quota': self.get_remaining_task_quota(),
-            'is_active': self.is_active,
+            'is_active': self.account_enabled,  # 对外接口仍使用is_active
             'is_admin': self.is_admin,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'last_login': self.last_login.isoformat() if self.last_login else None

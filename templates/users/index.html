@@ -46,6 +46,9 @@
                     <p class="text-muted mb-0">管理系统用户账户</p>
                 </div>
                 <div>
+                    <button class="btn btn-danger me-2" onclick="disableAllUsers()">
+                        <i class="fas fa-ban me-2"></i>一键禁用所有用户
+                    </button>
                     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createUserModal">
                         <i class="fas fa-plus me-2"></i>添加用户
                     </button>
@@ -67,7 +70,7 @@
         <div class="col-md-3">
             <div class="card">
                 <div class="card-body text-center">
-                    <h3 class="mb-0 text-success">{{ users|selectattr('is_active')|list|length }}</h3>
+                    <h3 class="mb-0 text-success">{{ users|selectattr('account_enabled')|list|length }}</h3>
                     <small class="text-muted">活跃用户</small>
                 </div>
             </div>
@@ -83,7 +86,7 @@
         <div class="col-md-3">
             <div class="card">
                 <div class="card-body text-center">
-                    <h3 class="mb-0 text-warning">{{ users|rejectattr('is_active')|list|length }}</h3>
+                    <h3 class="mb-0 text-warning">{{ users|rejectattr('account_enabled')|list|length }}</h3>
                     <small class="text-muted">禁用用户</small>
                 </div>
             </div>
@@ -133,7 +136,7 @@
                                         <span class="badge bg-info">{{ user.get_task_count() }}/{{ user.max_tasks }}</span>
                                     </td>
                                     <td>
-                                        {% if user.is_active %}
+                                        {% if user.account_enabled %}
                                         <span class="badge bg-success status-badge">正常</span>
                                         {% else %}
                                         <span class="badge bg-danger status-badge">禁用</span>
@@ -157,8 +160,11 @@
                                                 <i class="fas fa-edit"></i>
                                             </a>
                                             {% if user.id != current_user.id %}
+                                            <button class="btn btn-outline-info" onclick="quickResetPassword({{ user.id }}, '{{ user.username }}')" title="重置为888888">
+                                                <i class="fas fa-key"></i>
+                                            </button>
                                             <button class="btn btn-outline-warning" onclick="toggleUserStatus({{ user.id }})">
-                                                <i class="fas fa-{{ 'ban' if user.is_active else 'check' }}"></i>
+                                                <i class="fas fa-{{ 'ban' if user.account_enabled else 'check' }}"></i>
                                             </button>
                                             <button class="btn btn-outline-danger" onclick="deleteUser({{ user.id }})">
                                                 <i class="fas fa-trash"></i>
@@ -383,6 +389,54 @@ function showAlert(message, type) {
             alert.remove();
         }
     }, 3000);
+}
+
+// 一键禁用所有用户
+function disableAllUsers() {
+    if (confirm('确定要禁用所有用户吗？\n\n注意：\n• 被禁用的用户无法启动任务\n• 您自己的账号不会被禁用\n• 此操作不可批量恢复，需要逐个启用')) {
+        fetch('/users/disable-all', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message, 'success');
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showAlert(data.message, 'error');
+            }
+        })
+        .catch(error => {
+            showAlert('操作失败：' + error.message, 'error');
+        });
+    }
+}
+
+// 快速重置密码为888888
+function quickResetPassword(userId, username) {
+    if (confirm(`确定要重置用户 "${username}" 的密码吗？\n\n新密码将设置为: 888888`)) {
+        fetch(`/users/${userId}/reset-password`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({password: '888888'})
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showAlert(data.message + ' (新密码: 888888)', 'success');
+            } else {
+                showAlert(data.message, 'error');
+            }
+        })
+        .catch(error => {
+            showAlert('操作失败：' + error.message, 'error');
+        });
+    }
 }
 </script>
 {% endblock %}

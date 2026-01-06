@@ -118,14 +118,25 @@ class AuthService:
         try:
             from models import Wallet, Task
             
-            stats = {
-                'total_wallets': Wallet.query.filter_by(user_id=user.id).count(),
-                'active_wallets': Wallet.query.filter_by(user_id=user.id, is_active=True).count(),
-                'total_tasks': Task.query.filter_by(user_id=user.id).count(),
-                'running_tasks': Task.query.filter_by(user_id=user.id, status='running').count(),
-                'last_login': user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else '首次登录',
-                'is_admin': user.is_admin
-            }
+            # 管理员查看所有数据，普通用户查看自己的数据
+            if user.is_admin:
+                stats = {
+                    'total_wallets': Wallet.query.count(),
+                    'active_wallets': Wallet.query.filter_by(is_active=True).count(),
+                    'total_tasks': Task.query.count(),
+                    'running_tasks': Task.query.filter_by(status='running').count(),
+                    'last_login': user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else '首次登录',
+                    'is_admin': user.is_admin
+                }
+            else:
+                stats = {
+                    'total_wallets': Wallet.query.filter_by(user_id=user.id).count(),
+                    'active_wallets': Wallet.query.filter_by(user_id=user.id, is_active=True).count(),
+                    'total_tasks': Task.query.filter_by(user_id=user.id).count(),
+                    'running_tasks': Task.query.filter_by(user_id=user.id, status='running').count(),
+                    'last_login': user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else '首次登录',
+                    'is_admin': user.is_admin
+                }
             
             return stats
             
@@ -139,9 +150,13 @@ class AuthService:
         try:
             from models import Task
             
-            return Task.query.filter_by(user_id=user.id)\
-                           .order_by(Task.updated_at.desc())\
-                           .limit(limit).all()
+            # 管理员查看所有任务，普通用户查看自己的任务
+            if user.is_admin:
+                return Task.query.order_by(Task.updated_at.desc()).limit(limit).all()
+            else:
+                return Task.query.filter_by(user_id=user.id)\
+                               .order_by(Task.updated_at.desc())\
+                               .limit(limit).all()
         except Exception as e:
             print(f"获取最近任务失败: {e}")
             return []

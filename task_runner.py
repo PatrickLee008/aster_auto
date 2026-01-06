@@ -496,50 +496,60 @@ class TaskRunner:
                 success = strategy_instance.run()
                 
                 # 7. 更新最终状态和统计
-                if success:
-                    self.logger.info("策略执行成功！")
-                    self.update_task_status('stopped')
+                # 无论成功还是停止，都要收集统计数据
+                self.logger.info(f"策略执行{'成功' if success else '结束'}！")
+                
+                # 获取执行统计（如果策略提供）
+                if hasattr(strategy_instance, 'completed_rounds'):
+                    total_rounds = getattr(strategy_instance, 'completed_rounds', 0)
+                    supplement_orders = getattr(strategy_instance, 'supplement_orders', 0)
+                    total_cost_diff = getattr(strategy_instance, 'total_cost_diff', 0)
                     
-                    # 获取执行统计（如果策略提供）
-                    if hasattr(strategy_instance, 'completed_rounds'):
-                        total_rounds = getattr(strategy_instance, 'completed_rounds', 0)
-                        supplement_orders = getattr(strategy_instance, 'supplement_orders', 0)
-                        total_cost_diff = getattr(strategy_instance, 'total_cost_diff', 0)
-                        
-                        # 获取新的统计数据
-                        buy_volume_usdt = getattr(strategy_instance, 'buy_volume_usdt', 0)
-                        sell_volume_usdt = getattr(strategy_instance, 'sell_volume_usdt', 0)
-                        total_fees_usdt = getattr(strategy_instance, 'total_fees_usdt', 0)
-                        initial_usdt_balance = getattr(strategy_instance, 'initial_usdt_balance', None)
-                        final_usdt_balance = getattr(strategy_instance, 'final_usdt_balance', None)
-                        usdt_balance_diff = getattr(strategy_instance, 'usdt_balance_diff', 0)
-                        net_loss_usdt = getattr(strategy_instance, 'net_loss_usdt', 0)
-                        
-                        # 获取失败轮次统计
-                        failed_rounds = getattr(strategy_instance, 'failed_rounds', 0)
-                        
-                        self.update_task_stats(
-                            total_rounds=total_rounds,
-                            successful_rounds=total_rounds,  # completed_rounds就是成功轮次
-                            failed_rounds=failed_rounds,
-                            supplement_orders=supplement_orders,
-                            total_cost_diff=total_cost_diff,
-                            buy_volume_usdt=buy_volume_usdt,
-                            sell_volume_usdt=sell_volume_usdt,
-                            total_fees_usdt=total_fees_usdt,
-                            initial_usdt_balance=initial_usdt_balance,
-                            final_usdt_balance=final_usdt_balance,
-                            usdt_balance_diff=usdt_balance_diff,
-                            net_loss_usdt=net_loss_usdt
-                        )
-                        
-                        total_volume = buy_volume_usdt + sell_volume_usdt
-                        self.logger.info(f"策略统计 - 完成轮次: {total_rounds}, 补单数: {supplement_orders}, 总损耗: {total_cost_diff:.4f} USDT")
-                        self.logger.info(f"交易统计 - 总交易量: {total_volume:.2f} USDT, 手续费: {total_fees_usdt:.4f} USDT")
-                        self.logger.info(f"USDT余额 - 差值: {usdt_balance_diff:+.4f}, 净损耗: {net_loss_usdt:+.4f} USDT")
+                    # 获取新的统计数据
+                    buy_volume_usdt = getattr(strategy_instance, 'buy_volume_usdt', 0)
+                    sell_volume_usdt = getattr(strategy_instance, 'sell_volume_usdt', 0)
+                    total_fees_usdt = getattr(strategy_instance, 'total_fees_usdt', 0)
+                    initial_usdt_balance = getattr(strategy_instance, 'initial_usdt_balance', None)
+                    final_usdt_balance = getattr(strategy_instance, 'final_usdt_balance', None)
+                    usdt_balance_diff = getattr(strategy_instance, 'usdt_balance_diff', 0)
+                    net_loss_usdt = getattr(strategy_instance, 'net_loss_usdt', 0)
+                    
+                    # 获取失败轮次统计
+                    failed_rounds = getattr(strategy_instance, 'failed_rounds', 0)
+                    
+                    # 更新统计数据到数据库
+                    self.update_task_stats(
+                        total_rounds=total_rounds,
+                        successful_rounds=total_rounds,  # completed_rounds就是成功轮次
+                        failed_rounds=failed_rounds,
+                        supplement_orders=supplement_orders,
+                        total_cost_diff=total_cost_diff,
+                        buy_volume_usdt=buy_volume_usdt,
+                        sell_volume_usdt=sell_volume_usdt,
+                        total_fees_usdt=total_fees_usdt,
+                        initial_usdt_balance=initial_usdt_balance,
+                        final_usdt_balance=final_usdt_balance,
+                        usdt_balance_diff=usdt_balance_diff,
+                        net_loss_usdt=net_loss_usdt
+                    )
+                    
+                    total_volume = buy_volume_usdt + sell_volume_usdt
+                    self.logger.info(f"策略统计 - 完成轮次: {total_rounds}, 补单数: {supplement_orders}, 总损耗: {total_cost_diff:.4f} USDT")
+                    self.logger.info(f"交易统计 - 总交易量: {total_volume:.2f} USDT, 手续费: {total_fees_usdt:.4f} USDT")
+                    self.logger.info(f"USDT余额 - 差值: {usdt_balance_diff:+.4f}, 净损耗: {net_loss_usdt:+.4f} USDT")
+                
+                # 更新任务状态
+                if success:
+                    self.update_task_status('stopped')
                 else:
-                    self.logger.error("策略执行失败！")
-                    self.update_task_status('error', '策略执行失败')
+                    # 即使未完全成功，但如果有完成的轮次，也标记为stopped而不是error
+                    if hasattr(strategy_instance, 'completed_rounds') and strategy_instance.completed_rounds > 0:
+                        self.update_task_status('stopped')
+                        self.logger.info(f"任务已停止（已完成 {strategy_instance.completed_rounds} 轮）")
+                    else:
+                        self.logger.error("策略执行失败！")
+                        self.update_task_status('error', '策略执行失败')
+                        
             except Exception as strategy_error:
                 self.logger.error(f"策略执行异常: {strategy_error}")
                 self.logger.error(f"策略执行异常详情: {traceback.format_exc()}")

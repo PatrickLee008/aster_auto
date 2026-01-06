@@ -138,15 +138,24 @@ def edit(user_id):
             if 'max_tasks' in data:
                 user.max_tasks = int(data['max_tasks'])
             if 'is_active' in data:
-                user.is_active = bool(data['is_active'])
+                user.account_enabled = bool(data['is_active'])
             if 'is_admin' in data and user.id != current_user.id:  # 不能修改自己的管理员权限
                 user.is_admin = bool(data['is_admin'])
             
             # 如果提供了新密码，则更新密码
             if 'password' in data and data['password']:
+                print(f"[DEBUG] 更新用户 {user.username} 的密码")
+                print(f"[DEBUG] 旧密码哈希: {user.password_hash[:50]}...")
                 user.set_password(data['password'])
+                print(f"[DEBUG] 新密码哈希: {user.password_hash[:50]}...")
+                # 立即验证新密码
+                verify_result = user.check_password(data['password'])
+                print(f"[DEBUG] 密码验证结果: {verify_result}")
+                if not verify_result:
+                    raise Exception("密码更新后验证失败，请检查密码哈希方法")
             
             db.session.commit()
+            print(f"[DEBUG] 数据已提交到数据库")
             
             message = f'用户 {user.username} 更新成功'
             if request.is_json:
@@ -175,10 +184,10 @@ def toggle_status(user_id):
         return jsonify({'success': False, 'message': '不能禁用自己的账户'})
     
     try:
-        user.is_active = not user.is_active
+        user.account_enabled = not user.account_enabled
         db.session.commit()
         
-        status = '启用' if user.is_active else '禁用'
+        status = '启用' if user.account_enabled else '禁用'
         return jsonify({'success': True, 'message': f'用户 {user.username} 已{status}'})
         
     except Exception as e:
@@ -229,11 +238,73 @@ def reset_password(user_id):
         return jsonify({'success': False, 'message': '新密码不能为空'})
     
     try:
-        user.set_password(new_password)
-        db.session.commit()
+        print(f"[DEBUG RESET] 重置用户 {user.username} (ID:{user.id}) 的密码")
+        print(f"[DEBUG RESET] 用户状态: account_enabled={user.account_enabled}")
+        print(f"[DEBUG RESET] 旧密码哈希: {user.password_hash[:50]}...")
         
-        return jsonify({'success': True, 'message': f'用户 {user.username} 密码已重置'})
+        # 重置密码
+        user.set_password(new_password)
+        
+        print(f"[DEBUG RESET] 新密码哈希: {user.password_hash[:50]}...")
+        
+        # 立即验证新密码
+        verify_result = user.check_password(new_password)
+        print(f"[DEBUG RESET] 密码验证结果: {verify_result}")
+        
+        if not verify_result:
+            raise Exception("密码重置后验证失败")
+        
+        db.session.commit()
+        print(f"[DEBUG RESET] 密码已成功重置并提交到数据库")
+        
+        message = f'用户 {user.username} 密码已重置'
+        if not user.account_enabled:
+            message += ' (注意: 该用户已被禁用，可以登录但无法启动任务)'
+        
+        return jsonify({'success': True, 'message': message})
         
     except Exception as e:
         db.session.rollback()
+        print(f"[DEBUG RESET] 密码重置失败: {e}")
         return jsonify({'success': False, 'message': str(e)})
+
+
+@users_bp.route('/disable-all', methods=['POST'])
+@login_required
+@admin_required
+def disable_all_users():
+    """一键禁用所有用户（除了当前管理员自己）"""
+    try:
+        # 获取所有活跃用户（排除当前管理员）
+        users_to_disable = User.query.filter(
+            User.account_enabled == True,
+            User.id != current_user.id
+        ).all()
+        
+        if not users_to_disable:
+            return jsonify({'success': False, 'message': '没有需要禁用的用户'})
+        
+        # 批量禁用用户
+        disabled_count = 0
+        disabled_usernames = []
+        
+        for user in users_to_disable:
+            user.account_enabled = False
+            disabled_count += 1
+            disabled_usernames.append(user.username)
+        
+        db.session.commit()
+        
+        message = f'成功禁用 {disabled_count} 个用户：{", ".join(disabled_usernames[:5])}'
+        if len(disabled_usernames) > 5:
+            message += f' 等{len(disabled_usernames)}个用户'
+        
+        return jsonify({
+            'success': True, 
+            'message': message,
+            'disabled_count': disabled_count
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'批量禁用失败: {str(e)}'})
