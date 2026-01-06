@@ -352,6 +352,15 @@ class WalletService:
     def _test_futures_connection(wallet: Wallet) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """测试期货钱包连接并获取余额"""
         try:
+            # 在 Flask 线程中创建事件循环，避免 Web3 报错
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                # 如果当前线程没有事件循环，创建一个新的
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
             from futures_client import AsterFuturesClient
             
             credentials = wallet.get_api_credentials()
@@ -377,42 +386,22 @@ class WalletService:
             if not client.test_connection():
                 return False, None
             
+            # 获取账户信息（使用与策略相同的方法）
+            account_info = client.get_account_info()
             
-            # 获取账户余额信息
-            # 根据API文档，期货账户信息端点是 /fapi/v3/balance
-            balance_result = client._make_request('GET', '/fapi/v3/balance', {}, need_signature=True)
-            balance_info = {}
+            if not account_info:
+                return False, None
             
-            print(f"📊 期货余额信息: {balance_result}")
+            # 从账户信息中提取余额
+            balance_info = {
+                'usdt_balance': float(account_info.get('totalWalletBalance', 0)),
+                'available_balance': float(account_info.get('availableBalance', 0)),
+                'cross_wallet_balance': float(account_info.get('totalCrossWalletBalance', 0)),
+                'unrealized_pnl': float(account_info.get('totalUnrealizedProfit', 0))
+            }
             
-            if balance_result and isinstance(balance_result, list):
-                # 查找USDT余额
-                for asset in balance_result:
-                    if asset.get('asset') == 'USDT':
-                        balance_info = {
-                            'usdt_balance': float(asset.get('balance', '0')),
-                            'available_balance': float(asset.get('availableBalance', '0')),
-                            'cross_wallet_balance': float(asset.get('crossWalletBalance', '0')),
-                            'unrealized_pnl': float(asset.get('crossUnPnl', '0'))
-                        }
-                        break
-                
-                if not balance_info:
-                    # 如果没找到USDT，使用默认值
-                    balance_info = {
-                        'usdt_balance': 0.0, 
-                        'available_balance': 0.0,
-                        'cross_wallet_balance': 0.0,
-                        'unrealized_pnl': 0.0
-                    }
-            else:
-                # API调用失败，返回N/A
-                balance_info = {
-                    'usdt_balance': 'N/A', 
-                    'available_balance': 'N/A',
-                    'cross_wallet_balance': 'N/A',
-                    'unrealized_pnl': 'N/A'
-                }
+            print(f"📊 期货余额信息: 总余额={balance_info['usdt_balance']:.4f} USDT, "
+                  f"可用={balance_info['available_balance']:.4f} USDT")
             
             return True, balance_info
             

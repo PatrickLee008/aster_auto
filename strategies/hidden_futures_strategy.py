@@ -36,6 +36,10 @@ class HiddenFuturesStrategy:
         self.client = None
         self.logger = None  # 日志记录器
         
+        # 交易对精度信息
+        self.tick_size = None  # 价格精度
+        self.step_size = None  # 数量精度
+        
         # 统计变量
         self.completed_rounds = 0
         self.failed_rounds = 0
@@ -99,6 +103,11 @@ class HiddenFuturesStrategy:
             if not leverage_result:
                 self.log("[FAILED] 杠杆设置失败", 'error')
                 return False
+            
+            # 获取交易对精度信息
+            if not self.get_symbol_precision():
+                self.log("[FAILED] 无法获取交易对精度信息", 'error')
+                return False
                 
             self.log("[SUCCESS] 连接和配置完成")
             
@@ -121,6 +130,63 @@ class HiddenFuturesStrategy:
         except Exception as e:
             self.log(f"[ERROR] 连接错误: {e}", 'error')
             return False
+    
+    def get_symbol_precision(self) -> bool:
+        """获取交易对的精度信息"""
+        try:
+            self.log("获取交易对精度信息...")
+            
+            # 获取交易所信息
+            exchange_info = self.client.get_exchange_info()
+            if not exchange_info:
+                self.log("❌ 无法获取交易所信息", 'error')
+                return False
+            
+            # 查找对应的交易对信息
+            symbols = exchange_info.get('symbols', [])
+            for symbol_info in symbols:
+                if symbol_info.get('symbol') == self.symbol:
+                    # 提取价格和数量精度信息
+                    filters = symbol_info.get('filters', [])
+                    for filter_item in filters:
+                        if filter_item.get('filterType') == 'PRICE_FILTER':
+                            self.tick_size = filter_item.get('tickSize')
+                        elif filter_item.get('filterType') == 'LOT_SIZE':
+                            self.step_size = filter_item.get('stepSize')
+                    
+                    self.log(f"✅ 交易对精度信息获取成功:")
+                    self.log(f"   价格精度 (tick_size): {self.tick_size}")
+                    self.log(f"   数量精度 (step_size): {self.step_size}")
+                    return True
+            
+            self.log(f"❌ 未找到交易对 {self.symbol} 的信息", "error")
+            return False
+            
+        except Exception as e:
+            self.log(f"❌ 获取交易对精度信息失败: {e}", "error")
+            return False
+    
+    def format_price(self, price: float) -> str:
+        """根据tick_size格式化价格"""
+        if not self.tick_size:
+            return f"{price:.5f}"  # 默认5位小数
+            
+        try:
+            tick_size_float = float(self.tick_size)
+            if tick_size_float == 0:
+                return str(price)
+            
+            # 计算精度位数
+            precision = len(self.tick_size.rstrip('0').split('.')[1]) if '.' in self.tick_size else 0
+            
+            # 根据tick_size调整价格（向下取整到最近的tick）
+            adjusted_price = round(price / tick_size_float) * tick_size_float
+            
+            return f"{adjusted_price:.{precision}f}"
+            
+        except Exception as e:
+            self.log(f"价格格式化失败: {e}", 'warning')
+            return f"{price:.5f}"  # 降级到默认格式
     
     def check_account_balance(self) -> bool:
         """检查账户余额是否充足"""
@@ -182,7 +248,7 @@ class HiddenFuturesStrategy:
             return False
     
     def get_mid_price(self) -> float:
-        """获取中间价格"""
+        """获取中间价格，并按照tick_size格式化"""
         try:
             # 获取深度信息
             book_ticker = self.client.get_book_ticker(self.symbol)
@@ -197,12 +263,15 @@ class HiddenFuturesStrategy:
             mid_price = (bid_price + ask_price) / 2
             spread = ask_price - bid_price
             
-            # 保留5位小数精度
-            mid_price = round(mid_price, 5)
+            # 使用tick_size格式化价格
+            formatted_price = self.format_price(mid_price)
+            mid_price = float(formatted_price)
             
             self.log(f"深度信息: 买一={bid_price:.5f}, 卖一={ask_price:.5f}")
             self.log(f"价差: {spread:.5f}")
-            self.log(f"中间价格: {mid_price:.5f}")
+            self.log(f"中间价格: {formatted_price} (符合tick_size)")
+            
+            return mid_price
             
             return mid_price
             

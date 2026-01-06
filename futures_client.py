@@ -290,6 +290,20 @@ class AsterFuturesClient:
     
     # 价格查询相关方法
     
+    def get_exchange_info(self, symbol: str = None) -> Optional[Dict[str, Any]]:
+        """
+        获取交易所信息
+        
+        Args:
+            symbol (str, optional): 交易对符号，不传则返回所有交易对
+            
+        Returns:
+            dict: 交易所信息，包含交易对精度等
+        """
+        params = {'symbol': symbol} if symbol else {}
+        result = self._make_request('GET', '/fapi/v3/exchangeInfo', params)
+        return result
+    
     def get_price(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         获取合约最新价格
