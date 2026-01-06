@@ -303,6 +303,80 @@ class HiddenFuturesStrategy:
                 self.log(f"[ERROR] 获取价格失败: {e}", 'error')
                 raise
     
+    def cleanup_before_round(self, round_num: int) -> bool:
+        """每轮开始前的清理工作：取消未成交订单 + 平仓"""
+        self.log(f"\n🧹 第{round_num}轮开始前清理...")
+        
+        cleanup_success = True
+        
+        # 1. 取消所有未成交订单
+        try:
+            self.log("检查并取消未成交订单...")
+            cancel_result = self.client.cancel_all_orders(self.symbol)
+            if cancel_result:
+                self.log(f"✅ 已取消所有未成交订单")
+            else:
+                self.log("ℹ️ 没有未成交订单需要取消")
+        except Exception as e:
+            self.log(f"⚠️ 取消订单失败: {e}", 'warning')
+            cleanup_success = False
+        
+        # 2. 检查并平仓所有持仓
+        try:
+            self.log("检查当前持仓...")
+            position_info = self.client.get_position_info(self.symbol)
+            
+            if position_info:
+                position_amt = float(position_info.get('positionAmt', 0))
+                
+                if position_amt != 0:
+                    self.log(f"⚠️ 发现未平仓位: {position_amt}张")
+                    
+                    # 平仓逻辑：使用市价单 + reduceOnly
+                    if position_amt > 0:
+                        # 多仓，需要卖出平仓
+                        self.log(f"平仓多头: 卖出{abs(position_amt)}张...")
+                        close_order = self.client.place_order(
+                            symbol=self.symbol,
+                            side='SELL',
+                            order_type='MARKET',
+                            quantity=str(abs(position_amt)),
+                            position_side='BOTH',
+                            reduce_only=True
+                        )
+                    else:
+                        # 空仓，需要买入平仓
+                        self.log(f"平仓空头: 买入{abs(position_amt)}张...")
+                        close_order = self.client.place_order(
+                            symbol=self.symbol,
+                            side='BUY',
+                            order_type='MARKET',
+                            quantity=str(abs(position_amt)),
+                            position_side='BOTH',
+                            reduce_only=True
+                        )
+                    
+                    if close_order:
+                        self.log(f"✅ 平仓成功，订单ID: {close_order.get('orderId')}")
+                    else:
+                        self.log(f"❌ 平仓失败", 'error')
+                        cleanup_success = False
+                else:
+                    self.log("✅ 无持仓，无需平仓")
+            else:
+                self.log("✅ 无持仓信息，可能没有持仓")
+                
+        except Exception as e:
+            self.log(f"⚠️ 平仓检查失败: {e}", 'warning')
+            cleanup_success = False
+        
+        if cleanup_success:
+            self.log("✅ 清理完成\n")
+        else:
+            self.log("⚠️ 清理过程中出现警告\n", 'warning')
+        
+        return cleanup_success
+    
     def monitor_and_handle_orders(self, long_order_id: str, short_order_id: str) -> bool:
         """监控订单状态，3秒内未成交则取消"""
         monitor_start_time = time.time()
@@ -550,6 +624,9 @@ class HiddenFuturesStrategy:
                 try:
                     round_start_time = time.time()
                     
+                    # 每轮开始前进行清理
+                    self.cleanup_before_round(round_num)
+                    
                     # 获取当前轮次的中间价格
                     mid_price = self.get_mid_price()
                     
@@ -588,6 +665,12 @@ class HiddenFuturesStrategy:
             
             total_end_time = time.time()
             total_duration = (total_end_time - total_start_time) * 1000
+            
+            # 最终清理：确保所有仓位已平仓
+            self.log(f"\\n{'='*60}")
+            self.log("=== 执行最终清理 ===")
+            self.log(f"{'='*60}")
+            self.cleanup_before_round(self.rounds + 1)  # 使用轮次+1作为标记
             
             # 输出最终统计
             self.log(f"\\n{'='*60}")
