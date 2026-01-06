@@ -126,7 +126,9 @@ class AsterFuturesClient:
             clean_params['nonce'] = nonce
             clean_params['user'] = self.user
             clean_params['signer'] = self.signer
-            clean_params['signature'] = '0x' + signed_message.signature.hex()
+            # 确保签名以0x开头，但不重复添加
+            sig_hex = signed_message.signature.hex()
+            clean_params['signature'] = sig_hex if sig_hex.startswith('0x') else '0x' + sig_hex
             
             print(f"✅ 签名完成: {clean_params['signature'][:20]}...")
             print(f"📤 最终参数: {clean_params}")
