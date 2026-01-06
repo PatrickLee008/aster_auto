@@ -1915,10 +1915,13 @@ class VolumeStrategy:
                 return True
                 
             elif (sell_filled or sell_partial) and not buy_filled:
-                # 卖单成交（完全或部分），买单未成交
-                # 获取卖单实际成交数量
+                # 卖单成交（完全或部分），买单未成交或部分成交
+                # 获取卖单和买单实际成交数量
                 sell_order_details = self.get_order_details(sell_order_id)
                 sell_executed_qty = Decimal(str(sell_order_details.get('executedQty', 0))) if sell_order_details else Decimal('0')
+                
+                buy_order_details = self.get_order_details(buy_order_id)
+                buy_executed_qty = Decimal(str(buy_order_details.get('executedQty', 0))) if buy_order_details else Decimal('0')
                 
                 if sell_partial:
                     self.log(f"⚠️ 卖单部分成交: 已成交 {sell_executed_qty}/{actual_quantity}")
@@ -1929,9 +1932,18 @@ class VolumeStrategy:
                     self.log(f"✅ 卖单完全成交: {sell_executed_qty}")
                     self.completed_order_ids.append(sell_order_id)
                 
+                # 检查买单成交情况
+                if buy_partial:
+                    self.log(f"⚠️ 买单部分成交: 已成交 {buy_executed_qty}/{actual_quantity}")
+                    # 部分成交也加入统计
+                    self.completed_order_ids.append(buy_order_id)
+                elif buy_executed_qty > 0:
+                    self.log(f"✅ 买单已成交: {buy_executed_qty}")
+                    self.completed_order_ids.append(buy_order_id)
+                
                 # 检查是否为最后一轮
                 if round_num == self.rounds:
-                    self.log("📈 卖单成交，买单未成交 - 最后一轮，不执行补单")
+                    self.log("📈 卖单成交，买单未完全成交 - 最后一轮，不执行补单")
                     
                     # 取消买单
                     self.cancel_order(buy_order_id)
@@ -1946,9 +1958,13 @@ class VolumeStrategy:
                     self.completed_rounds += 1
                     return True
                 else:
-                    # 非最后一轮，执行买入补单 - 只补卖出的实际数量
-                    补单数量 = sell_executed_qty
-                    self.log(f"📈 卖单成交，买单未成交 - 执行买入补单（补{补单数量}）")
+                    # 非最后一轮，执行买入补单 - 只补差额部分
+                    补单数量 = sell_executed_qty - buy_executed_qty
+                    if 补单数量 <= 0:
+                        self.log(f"✅ 买卖成交数量已平衡，无需补单")
+                        self.completed_rounds += 1
+                        return True
+                    self.log(f"📈 卖单成交{sell_executed_qty}，买单成交{buy_executed_qty} - 执行买入补单（补{补单数量}）")
                     
                     # 取消买单
                     self.cancel_order(buy_order_id)
@@ -1977,10 +1993,13 @@ class VolumeStrategy:
                         return False
                     
             elif (buy_filled or buy_partial) and not sell_filled:
-                # 买单成交（完全或部分），卖单未成交
-                # 获取买单实际成交数量
+                # 买单成交（完全或部分），卖单未成交或部分成交
+                # 获取买单和卖单实际成交数量
                 buy_order_details = self.get_order_details(buy_order_id)
                 buy_executed_qty = Decimal(str(buy_order_details.get('executedQty', 0))) if buy_order_details else Decimal('0')
+                
+                sell_order_details = self.get_order_details(sell_order_id)
+                sell_executed_qty = Decimal(str(sell_order_details.get('executedQty', 0))) if sell_order_details else Decimal('0')
                 
                 if buy_partial:
                     self.log(f"⚠️ 买单部分成交: 已成交 {buy_executed_qty}/{actual_quantity}")
@@ -1991,9 +2010,18 @@ class VolumeStrategy:
                     self.log(f"✅ 买单完全成交: {buy_executed_qty}")
                     self.completed_order_ids.append(buy_order_id)
                 
+                # 检查卖单成交情况
+                if sell_partial:
+                    self.log(f"⚠️ 卖单部分成交: 已成交 {sell_executed_qty}/{actual_quantity}")
+                    # 部分成交也加入统计
+                    self.completed_order_ids.append(sell_order_id)
+                elif sell_executed_qty > 0:
+                    self.log(f"✅ 卖单已成交: {sell_executed_qty}")
+                    self.completed_order_ids.append(sell_order_id)
+                
                 # 检查是否为最后一轮
                 if round_num == self.rounds:
-                    self.log("📉 买单成交，卖单未成交 - 最后一轮，不执行补单")
+                    self.log("📉 买单成交，卖单未完全成交 - 最后一轮，不执行补单")
                     
                     # 取消卖单
                     self.cancel_order(sell_order_id)
@@ -2008,9 +2036,13 @@ class VolumeStrategy:
                     self.completed_rounds += 1
                     return True
                 else:
-                    # 非最后一轮，执行卖出补单 - 只补买入的实际数量
-                    补单数量 = buy_executed_qty
-                    self.log(f"📉 买单成交，卖单未成交 - 执行卖出补单（补{补单数量}）")
+                    # 非最后一轮，执行卖出补单 - 只补差额部分
+                    补单数量 = buy_executed_qty - sell_executed_qty
+                    if 补单数量 <= 0:
+                        self.log(f"✅ 买卖成交数量已平衡，无需补单")
+                        self.completed_rounds += 1
+                        return True
+                    self.log(f"📉 买单成交{buy_executed_qty}，卖单成交{sell_executed_qty} - 执行卖出补单（补{补单数量}）")
                     
                     # 取消卖单
                     self.cancel_order(sell_order_id)
