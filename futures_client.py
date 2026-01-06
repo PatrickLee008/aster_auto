@@ -87,11 +87,11 @@ class AsterFuturesClient:
             dict: 包含签名的完整参数
         """
         try:
-            # print(f"🔐 [期货签名调试] 开始签名参数...")
-            # print(f"📋 原始参数: {params}")
-            # print(f"👤 用户地址: {self.user}")
-            # print(f"✍️  签名地址: {self.signer}")
-            # print(f"🔑 私钥长度: {len(self.private_key) if self.private_key else 'None'}")
+            print(f"🔐 [期货签名调试] 开始签名参数...")
+            print(f"📋 原始参数: {params}")
+            print(f"👤 用户地址: {self.user}")
+            print(f"✍️  签名地址: {self.signer}")
+            print(f"🔑 私钥长度: {len(self.private_key) if self.private_key else 'None'}")
             
             # 检查私钥是否为None
             if self.private_key is None:
@@ -108,12 +108,12 @@ class AsterFuturesClient:
             clean_params['recvWindow'] = 50000
             clean_params['timestamp'] = int(round(time.time() * 1000))
             
-            # print(f"⏰ Nonce: {nonce}")
-            # print(f"📅 Timestamp: {clean_params['timestamp']}")
+            print(f"⏰ Nonce: {nonce}")
+            print(f"📅 Timestamp: {clean_params['timestamp']}")
             
             # 生成签名消息
             msg_hash = self._generate_message_hash(clean_params, nonce)
-            # print(f"🔒 消息哈希: {msg_hash}")
+            print(f"🔒 消息哈希: {msg_hash}")
             
             if msg_hash is None:
                 raise ValueError("生成的消息哈希为None")
@@ -128,14 +128,14 @@ class AsterFuturesClient:
             clean_params['signer'] = self.signer
             clean_params['signature'] = '0x' + signed_message.signature.hex()
             
-            # print(f"✅ 签名完成: {clean_params['signature'][:20]}...")
-            # print(f"📤 最终参数: {clean_params}")
+            print(f"✅ 签名完成: {clean_params['signature'][:20]}...")
+            print(f"📤 最终参数: {clean_params}")
             
             return clean_params
             
         except Exception as e:
             print(f"❌ 签名失败: {e}")
-            print(f"🔑 私钥: {self.private_key}")
+            print(f"🔑 私钥: {self.private_key[:10] if self.private_key else 'None'}...")
             print(f"👤 用户地址: {self.user}")
             print(f"✍️  签名地址: {self.signer}")
             print(f"📋 原始参数: {params}")
