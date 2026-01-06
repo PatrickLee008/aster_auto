@@ -41,6 +41,11 @@ class VolumeStrategy:
         self.market_client = None  # 市价单客户端
         self.logger = None  # 日志记录器
         
+        # 从交易对中提取基础资产和计价货币
+        self.base_asset = None   # 基础资产（如 BUS、SENTIS）
+        self.quote_asset = None  # 计价货币（如 USD1、USDT）
+        self._parse_symbol()  # 解析交易对
+        
         # 风险控制参数 - 优化时间参数提高成交率
         self.order_check_timeout = 1.0  # 订单成交检查时间(改为2秒，给买卖订单更多成交时间)
         self.max_price_deviation = 0.01  # 最大价格偏差(1%)
@@ -65,13 +70,14 @@ class VolumeStrategy:
         self.auto_purchased = 0.0    # 自动购买的数量（需要最终卖出）
         
         # 新增交易量和手续费统计
-        self.buy_volume_usdt = 0.0   # 买单总交易量(USDT)
-        self.sell_volume_usdt = 0.0  # 卖单总交易量(USDT) 
-        self.total_fees_usdt = 0.0   # 总手续费(USDT)
-        self.initial_usdt_balance = 0.0  # 策略开始时的USDT余额
-        self.final_usdt_balance = 0.0    # 策略结束时的USDT余额
-        self.usdt_balance_diff = 0.0     # USDT余额差值
-        self.net_loss_usdt = 0.0         # 净损耗(USDT) = 余额差值 - 总手续费
+        # 注意：虽然变量名包含 usdt，但实际存储的是计价货币的值（可能是 USDT、USD1 等）
+        self.buy_volume_usdt = 0.0   # 买单总交易量(计价货币)
+        self.sell_volume_usdt = 0.0  # 卖单总交易量(计价货币) 
+        self.total_fees_usdt = 0.0   # 总手续费(计价货币)
+        self.initial_usdt_balance = 0.0  # 策略开始时的计价货币余额
+        self.final_usdt_balance = 0.0    # 策略结束时的计价货币余额
+        self.usdt_balance_diff = 0.0     # 计价货币余额差值
+        self.net_loss_usdt = 0.0         # 净损耗(计价货币) = 余额差值 - 总手续费
         
         # 订单跟踪 - 用于检查卡单
         self.pending_orders = []     # 记录当前轮次的订单ID
@@ -141,6 +147,23 @@ class VolumeStrategy:
             self.log(f"❌ 智能余额检查失败: {e}", "error")
             # 降级到直接查询余额
             return self.get_asset_balance()
+    
+    def _parse_symbol(self):
+        """从交易对中解析基础资产和计价货币"""
+        # 常见的计价货币列表（按长度降序排列，优先匹配长的）
+        quote_currencies = ['USDT', 'USDC', 'USD1', 'BUSD', 'DAI', 'BTC', 'ETH', 'BNB']
+        
+        for quote in quote_currencies:
+            if self.symbol.endswith(quote):
+                self.quote_asset = quote
+                self.base_asset = self.symbol[:-len(quote)]
+                self.log(f"📊 交易对解析: {self.symbol} = {self.base_asset}/{self.quote_asset}")
+                return
+        
+        # 如果没有匹配到，假设最后4个字符是计价货币（通用方案）
+        self.quote_asset = self.symbol[-4:]
+        self.base_asset = self.symbol[:-4]
+        self.log(f"⚠️ 交易对解析(通用): {self.symbol} = {self.base_asset}/{self.quote_asset}", "warning")
     
     def log(self, message, level='info'):
         """记录日志"""
@@ -343,29 +366,28 @@ class VolumeStrategy:
                         pass
                     time.sleep(0.5)
                 
-                # 检查账户余额 - 根据交易对自动检测
-                base_asset = self.symbol.replace('USDT', '')  # 从交易对获取基础资产，如SENTISUSDT→SENTIS
+                # 检查账户余额 - 使用动态解析的计价货币
                 account_info = self.client.get_account_info()
                 if account_info and 'balances' in account_info:
-                    usdt_balance = 0.0
-                    asset_balance = 0.0
+                    quote_balance = 0.0  # 计价货币余额（如 USDT 或 USD1）
+                    asset_balance = 0.0   # 基础资产余额
                     
                     for balance in account_info['balances']:
-                        if balance['asset'] == 'USDT':
-                            usdt_balance = float(balance['free'])
-                        elif balance['asset'] == base_asset:
+                        if balance['asset'] == self.quote_asset:
+                            quote_balance = float(balance['free'])
+                        elif balance['asset'] == self.base_asset:
                             asset_balance = float(balance['free'])
                     
-                    self.log(f"USDT余额: {usdt_balance:.2f}")
-                    self.log(f"{base_asset}余额: {asset_balance:.2f}")
+                    self.log(f"{self.quote_asset}余额: {quote_balance:.2f}")
+                    self.log(f"{self.base_asset}余额: {asset_balance:.2f}")
                     
                     required_quantity = float(self.quantity)
                     if asset_balance < required_quantity:
-                        self.log(f"警告: {base_asset}余额不足 ({asset_balance:.2f} < {required_quantity:.2f})")
+                        self.log(f"警告: {self.base_asset}余额不足 ({asset_balance:.2f} < {required_quantity:.2f})")
                         self.log("刷量策略可能会在卖出时失败")
-                        self.log(f"需要使用USDT余额({usdt_balance:.2f})进行补齐")
+                        self.log(f"需要使用{self.quote_asset}余额({quote_balance:.2f})进行补齐")
                     else:
-                        self.log(f"{base_asset}余额充足 ({asset_balance:.2f} >= {required_quantity:.2f})")
+                        self.log(f"{self.base_asset}余额充足 ({asset_balance:.2f} >= {required_quantity:.2f})")
                 else:
                     self.log("未能获取账户余额信息")
                 
@@ -772,12 +794,11 @@ class VolumeStrategy:
         """获取交易资产的当前余额 - 带重试机制"""
         for attempt in range(max_retries):
             try:
-                base_asset = self.symbol.replace('USDT', '')  # 从交易对获取基础资产
                 account_info = self.client.get_account_info()
                 
                 if account_info and 'balances' in account_info:
                     for balance in account_info['balances']:
-                        if balance['asset'] == base_asset:
+                        if balance['asset'] == self.base_asset:
                             return float(balance['free'])
                 return 0.0
                 
@@ -798,15 +819,15 @@ class VolumeStrategy:
         
         return 0.0
     
-    def get_usdt_balance(self, max_retries: int = 3) -> float:
-        """获取USDT余额 - 带重试机制"""
+    def get_quote_balance(self, max_retries: int = 3) -> float:
+        """获取计价货币余额（如 USDT 或 USD1）- 带重试机制"""
         for attempt in range(max_retries):
             try:
                 account_info = self.client.get_account_info()
                 
                 if account_info and 'balances' in account_info:
                     for balance in account_info['balances']:
-                        if balance['asset'] == 'USDT':
+                        if balance['asset'] == self.quote_asset:
                             return float(balance['free'])
                 return 0.0
                 
@@ -814,18 +835,23 @@ class VolumeStrategy:
                 error_msg = str(e)
                 if attempt < max_retries - 1:
                     if "SSL" in error_msg or "EOF" in error_msg or "Connection" in error_msg:
-                        self.log(f"⚠️ 获取USDT余额网络异常 (第{attempt+1}次尝试): {type(e).__name__}", "warning")
+                        self.log(f"⚠️ 获取{self.quote_asset}余额网络异常 (第{attempt+1}次尝试): {type(e).__name__}", "warning")
                         time.sleep(1)
                         continue
                     else:
-                        self.log(f"获取USDT余额失败: {e}", 'error')
+                        self.log(f"获取{self.quote_asset}余额失败: {e}", 'error')
                         return 0.0
                 else:
-                    self.log(f"❌ 获取USDT余额最终失败 (已重试{max_retries}次): {type(e).__name__}", "error")
-                    self.log(f"获取USDT余额失败: {e}", 'error')
+                    self.log(f"❌ 获取{self.quote_asset}余额最终失败 (已重试{max_retries}次): {type(e).__name__}", "error")
+                    self.log(f"获取{self.quote_asset}余额失败: {e}", 'error')
                     return 0.0
         
         return 0.0
+    
+    # 保留兼容性方法
+    def get_usdt_balance(self, max_retries: int = 3) -> float:
+        """获取USDT余额 - 兼容旧代码，实际调用 get_quote_balance"""
+        return self.get_quote_balance(max_retries)
     
     def cancel_order(self, order_id: int, max_retries: int = 3) -> bool:
         """撤销订单 - 带重试机制"""
@@ -2159,9 +2185,9 @@ class VolumeStrategy:
         self.original_balance = self.get_asset_balance()
         self.log(f"原始余额: {self.original_balance:.2f}")
         
-        # 记录初始USDT余额
-        self.initial_usdt_balance = self.get_usdt_balance()
-        self.log(f"初始USDT余额: {self.initial_usdt_balance:.4f}")
+        # 记录初始计价货币余额
+        self.initial_usdt_balance = self.get_quote_balance()
+        self.log(f"初始{self.quote_asset}余额: {self.initial_usdt_balance:.4f}")
         
         # 检查余额并自动补齐
         if not self.auto_purchase_if_insufficient():
@@ -2214,8 +2240,8 @@ class VolumeStrategy:
             # 卖光所有现货持仓
             sellout_success = self.sell_all_holdings()
             
-            # 记录最终USDT余额并计算损耗
-            self.final_usdt_balance = self.get_usdt_balance()
+            # 记录最终计价货币余额并计算损耗
+            self.final_usdt_balance = self.get_quote_balance()
             self.usdt_balance_diff = self.final_usdt_balance - self.initial_usdt_balance
             self.net_loss_usdt = self.usdt_balance_diff - self.total_fees_usdt
             
@@ -2230,21 +2256,21 @@ class VolumeStrategy:
             else:
                 self.log(f"成功率: 0.0%")
             self.log(f"补单次数: {self.supplement_orders}")
-            self.log(f"估算损耗: {self.total_cost_diff:.4f} USDT")
+            self.log(f"估算损耗: {self.total_cost_diff:.4f} {self.quote_asset}")
             
             # 新增交易量和手续费统计
             total_volume = self.buy_volume_usdt + self.sell_volume_usdt
             self.log(f"\n=== 交易统计 ===")
-            self.log(f"买单总交易量: {self.buy_volume_usdt:.2f} USDT")
-            self.log(f"卖单总交易量: {self.sell_volume_usdt:.2f} USDT") 
-            self.log(f"总交易量: {total_volume:.2f} USDT")
-            self.log(f"总手续费: {self.total_fees_usdt:.4f} USDT")
+            self.log(f"买单总交易量: {self.buy_volume_usdt:.2f} {self.quote_asset}")
+            self.log(f"卖单总交易量: {self.sell_volume_usdt:.2f} {self.quote_asset}") 
+            self.log(f"总交易量: {total_volume:.2f} {self.quote_asset}")
+            self.log(f"总手续费: {self.total_fees_usdt:.4f} {self.quote_asset}")
             
-            self.log(f"\n=== USDT余额分析 ===")
-            self.log(f"初始USDT余额: {self.initial_usdt_balance:.4f}")
-            self.log(f"最终USDT余额: {self.final_usdt_balance:.4f}")
-            self.log(f"USDT余额差值: {self.usdt_balance_diff:+.4f}")
-            self.log(f"净损耗(差值-手续费): {self.net_loss_usdt:+.4f} USDT")
+            self.log(f"\n=== {self.quote_asset}余额分析 ===")
+            self.log(f"初始{self.quote_asset}余额: {self.initial_usdt_balance:.4f}")
+            self.log(f"最终{self.quote_asset}余额: {self.final_usdt_balance:.4f}")
+            self.log(f"{self.quote_asset}余额差值: {self.usdt_balance_diff:+.4f}")
+            self.log(f"净损耗(差值-手续费): {self.net_loss_usdt:+.4f} {self.quote_asset}")
             
             if self.auto_purchased > 0:
                 self.log(f"自动购买数量: {self.auto_purchased:.2f}")
