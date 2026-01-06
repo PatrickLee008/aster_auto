@@ -38,6 +38,17 @@ class AsterFuturesClient:
             use_proxy (bool): 是否使用代理
         """
         # 确保地址格式正确（checksum格式）
+        # 在多线程环境中避免事件循环问题
+        try:
+            import asyncio
+            try:
+                asyncio.get_event_loop()
+            except RuntimeError:
+                # 如果当前线程没有事件循环，创建一个新的
+                asyncio.set_event_loop(asyncio.new_event_loop())
+        except Exception:
+            pass
+        
         from web3 import Web3
         try:
             self.user = Web3.to_checksum_address(user_address)
