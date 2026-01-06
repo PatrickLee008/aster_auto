@@ -255,31 +255,23 @@ class AsterFuturesClient:
         Returns:
             bool: 连接是否成功
         """
-        max_retries = 3
-        timeout_list = [15, 20, 30]  # 逐步增加超时时间
+        # 在Flask线程中简化连接测试，只尝试一次以避免事件循环问题
+        try:
+            print(f"期货连接测试 (超时: 10s)")
+            
+            response = requests.get(
+                self.host + "/fapi/v3/ping",
+                proxies=self.proxies,
+                timeout=10,
+                verify=False
+            )
+            if response.status_code == 200:
+                print("期货服务器连接正常")
+                return True
+        except Exception as e:
+            print(f"期货服务器连接失败: {e}")
         
-        for attempt in range(max_retries):
-            try:
-                timeout = timeout_list[attempt]
-                print(f"期货连接测试 (尝试 {attempt + 1}/{max_retries}, 超时: {timeout}s)")
-                
-                response = requests.get(
-                    self.host + "/fapi/v3/ping",
-                    proxies=self.proxies,
-                    timeout=timeout,
-                    verify=False
-                )
-                if response.status_code == 200:
-                    print("期货服务器连接正常")
-                    return True
-            except Exception as e:
-                print(f"期货服务器连接失败 (尝试 {attempt + 1}): {e}")
-                if attempt < max_retries - 1:
-                    print("等待2秒后重试...")
-                    import time
-                    time.sleep(2)
-        
-        print("期货服务器连接失败 - 所有重试都失败")
+        print("期货服务器连接失败")
         return False
     
     
