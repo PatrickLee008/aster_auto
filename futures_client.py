@@ -572,6 +572,22 @@ class AsterFuturesClient:
         result = self._make_request('GET', '/fapi/v3/account', params, need_signature=True)
         return result
     
+    def get_account_balance(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取账户余额 v3
+        
+        Returns:
+            list: 资产余额列表，每个元素包含 asset, balance, availableBalance 等
+        """
+        params = {
+            'timestamp': int(round(time.time() * 1000)),
+            'recvWindow': 50000
+        }
+        result = self._make_request('GET', '/fapi/v3/balance', params, need_signature=True)
+        if result:
+            print(f"账户余额查询成功: {len(result) if isinstance(result, list) else 'N/A'} 种资产")
+        return result
+    
     def set_margin_type(self, symbol: str, margin_type: str) -> Optional[Dict[str, Any]]:
         """
         变换逐全仓模式

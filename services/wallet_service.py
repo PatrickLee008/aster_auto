@@ -378,18 +378,19 @@ class WalletService:
                 return False, None
             
             
-            # 获取账户信息和USDT余额
-            account_info = client.get_account_info()
+            # 获取账户余额信息
+            # 根据API文档，期货账户信息端点是 /fapi/v3/balance
+            balance_result = client._make_request('GET', '/fapi/v3/balance', {}, need_signature=True)
             balance_info = {}
             
-            print(f"📊 期货账户信息: {account_info}")
+            print(f"📊 期货余额信息: {balance_result}")
             
-            if account_info and 'assets' in account_info:
+            if balance_result and isinstance(balance_result, list):
                 # 查找USDT余额
-                for asset in account_info['assets']:
+                for asset in balance_result:
                     if asset.get('asset') == 'USDT':
                         balance_info = {
-                            'usdt_balance': float(asset.get('walletBalance', '0')),
+                            'usdt_balance': float(asset.get('balance', '0')),
                             'available_balance': float(asset.get('availableBalance', '0')),
                             'cross_wallet_balance': float(asset.get('crossWalletBalance', '0')),
                             'unrealized_pnl': float(asset.get('crossUnPnl', '0'))
@@ -397,6 +398,7 @@ class WalletService:
                         break
                 
                 if not balance_info:
+                    # 如果没找到USDT，使用默认值
                     balance_info = {
                         'usdt_balance': 0.0, 
                         'available_balance': 0.0,
@@ -404,6 +406,7 @@ class WalletService:
                         'unrealized_pnl': 0.0
                     }
             else:
+                # API调用失败，返回N/A
                 balance_info = {
                     'usdt_balance': 'N/A', 
                     'available_balance': 'N/A',
