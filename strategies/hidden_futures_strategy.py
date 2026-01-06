@@ -248,36 +248,60 @@ class HiddenFuturesStrategy:
             return False
     
     def get_mid_price(self) -> float:
-        """获取中间价格，并按照tick_size格式化"""
-        try:
-            # 获取深度信息
-            book_ticker = self.client.get_book_ticker(self.symbol)
-            if not book_ticker:
-                self.log("[FAILED] 无法获取价格信息", 'error')
-                raise Exception("无法获取价格信息")
-            
-            bid_price = float(book_ticker['bidPrice'])  # 买一价格
-            ask_price = float(book_ticker['askPrice'])  # 卖一价格
-            
-            # 计算中间价格
-            mid_price = (bid_price + ask_price) / 2
-            spread = ask_price - bid_price
-            
-            # 使用tick_size格式化价格
-            formatted_price = self.format_price(mid_price)
-            mid_price = float(formatted_price)
-            
-            self.log(f"深度信息: 买一={bid_price:.5f}, 卖一={ask_price:.5f}")
-            self.log(f"价差: {spread:.5f}")
-            self.log(f"中间价格: {formatted_price} (符合tick_size)")
-            
-            return mid_price
-            
-            return mid_price
-            
-        except Exception as e:
-            self.log(f"[ERROR] 获取价格失败: {e}", 'error')
-            raise
+        """获取中间价格，并按照tick_size格式化，有价格空隙检查"""
+        max_attempts = 30  # 最多尝试30次（60秒）
+        attempt = 0
+        
+        while attempt < max_attempts:
+            try:
+                # 获取深度信息
+                book_ticker = self.client.get_book_ticker(self.symbol)
+                if not book_ticker:
+                    self.log("[FAILED] 无法获取价格信息", 'error')
+                    raise Exception("无法获取价格信息")
+                
+                bid_price = float(book_ticker['bidPrice'])  # 买一价格
+                ask_price = float(book_ticker['askPrice'])  # 卖一价格
+                
+                # 计算价差
+                spread = ask_price - bid_price
+                
+                self.log(f"深度信息: 买一={bid_price:.5f}, 卖一={ask_price:.5f}, 价差={spread:.5f}")
+                
+                # 检查是否存在价格空隙
+                tick_size_float = float(self.tick_size) if self.tick_size else 0.00001
+                next_bid_price = bid_price + tick_size_float
+                
+                if next_bid_price < ask_price:
+                    # 有价格空隙：可以使用中间价格
+                    mid_price = (bid_price + ask_price) / 2
+                    
+                    # 使用tick_size格式化价格
+                    formatted_price = self.format_price(mid_price)
+                    mid_price = float(formatted_price)
+                    
+                    self.log(f"✅ 发现价格空隙！买一+1档({next_bid_price:.5f}) < 卖一({ask_price:.5f})")
+                    self.log(f"中间价格: {formatted_price} (符合tick_size)")
+                    
+                    return mid_price
+                else:
+                    # 无价格空隙：买一+1档 >= 卖一
+                    attempt += 1
+                    self.log(f"⏳ 无价格空隙 (买一+1档:{next_bid_price:.5f} >= 卖一:{ask_price:.5f}), "
+                           f"等待2秒后重试 ({attempt}/{max_attempts})")
+                    
+                    if attempt < max_attempts:
+                        time.sleep(2)
+                        continue
+                    else:
+                        self.log(f"⚠️ 等待{max_attempts*2}秒后仍无价格空隙，使用买一价格", "warning")
+                        # 降级方案：使用买一价格
+                        formatted_price = self.format_price(bid_price)
+                        return float(formatted_price)
+                
+            except Exception as e:
+                self.log(f"[ERROR] 获取价格失败: {e}", 'error')
+                raise
     
     def monitor_and_handle_orders(self, long_order_id: str, short_order_id: str) -> bool:
         """监控订单状态，3秒内未成交则取消"""
