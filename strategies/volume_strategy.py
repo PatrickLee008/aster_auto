@@ -7,6 +7,7 @@ import time
 import random
 import signal
 from typing import Optional, Dict, Any
+from decimal import Decimal
 import sys
 import os
 
@@ -1881,9 +1882,11 @@ class VolumeStrategy:
                 sell_status = self.check_order_status(sell_order_id) if sell_order_id else 'UNKNOWN'
                 self.log(f"单独查询订单状态 - 买入: {buy_status}, 卖出: {sell_status}")
             
-            # 分析成交情况
+            # 分析成交情况 - 需要同时考虑 FILLED 和 PARTIALLY_FILLED
             buy_filled = buy_status == 'FILLED'
             sell_filled = sell_status == 'FILLED'
+            buy_partial = buy_status == 'PARTIALLY_FILLED'
+            sell_partial = sell_status == 'PARTIALLY_FILLED'
             
             if buy_filled and sell_filled:
                 # 双向成交 - 优化策略的目标结果
@@ -1911,12 +1914,24 @@ class VolumeStrategy:
                 self.log(f"✅ 第 {round_num} 轮交易完成 (优化策略成功)")
                 return True
                 
-            elif sell_filled and not buy_filled:
-                # 只有卖单成交，检查是否为最后一轮
+            elif (sell_filled or sell_partial) and not buy_filled:
+                # 卖单成交（完全或部分），买单未成交
+                # 获取卖单实际成交数量
+                sell_order_details = self.get_order_details(sell_order_id)
+                sell_executed_qty = Decimal(str(sell_order_details.get('executedQty', 0))) if sell_order_details else Decimal('0')
+                
+                if sell_partial:
+                    self.log(f"⚠️ 卖单部分成交: 已成交 {sell_executed_qty}/{actual_quantity}")
+                    # 部分成交也加入统计
+                    self.completed_order_ids.append(sell_order_id)
+                else:
+                    # 完全成交
+                    self.log(f"✅ 卖单完全成交: {sell_executed_qty}")
+                    self.completed_order_ids.append(sell_order_id)
+                
+                # 检查是否为最后一轮
                 if round_num == self.rounds:
                     self.log("📈 卖单成交，买单未成交 - 最后一轮，不执行补单")
-                    # 延迟统计更新
-                    self.completed_order_ids.append(sell_order_id)
                     
                     # 取消买单
                     self.cancel_order(buy_order_id)
@@ -1931,10 +1946,9 @@ class VolumeStrategy:
                     self.completed_rounds += 1
                     return True
                 else:
-                    # 非最后一轮，执行买入补单
-                    self.log("📈 卖单成交，买单未成交 - 执行买入补单")
-                    # 延迟统计更新
-                    self.completed_order_ids.append(sell_order_id)
+                    # 非最后一轮，执行买入补单 - 只补卖出的实际数量
+                    补单数量 = sell_executed_qty
+                    self.log(f"📈 卖单成交，买单未成交 - 执行买入补单（补{补单数量}）")
                     
                     # 取消买单
                     self.cancel_order(buy_order_id)
@@ -1945,9 +1959,9 @@ class VolumeStrategy:
                     if buy_order_id in self.pending_orders:
                         self.pending_orders.remove(buy_order_id)
                     
-                    # 市价买入补单
+                    # 市价买入补单 - 使用实际成交数量
                     time.sleep(0.5)
-                    success = self.place_market_buy_order(actual_quantity)
+                    success = self.place_market_buy_order(float(补单数量))
                     if success:
                         self.log("✅ 买入补单成功")
                         self.supplement_orders += 1  # 增加补单计数
@@ -1962,12 +1976,24 @@ class VolumeStrategy:
                         self.log("❌ 买入补单失败", 'error')
                         return False
                     
-            elif buy_filled and not sell_filled:
-                # 只有买单成交，检查是否为最后一轮
+            elif (buy_filled or buy_partial) and not sell_filled:
+                # 买单成交（完全或部分），卖单未成交
+                # 获取买单实际成交数量
+                buy_order_details = self.get_order_details(buy_order_id)
+                buy_executed_qty = Decimal(str(buy_order_details.get('executedQty', 0))) if buy_order_details else Decimal('0')
+                
+                if buy_partial:
+                    self.log(f"⚠️ 买单部分成交: 已成交 {buy_executed_qty}/{actual_quantity}")
+                    # 部分成交也加入统计
+                    self.completed_order_ids.append(buy_order_id)
+                else:
+                    # 完全成交
+                    self.log(f"✅ 买单完全成交: {buy_executed_qty}")
+                    self.completed_order_ids.append(buy_order_id)
+                
+                # 检查是否为最后一轮
                 if round_num == self.rounds:
                     self.log("📉 买单成交，卖单未成交 - 最后一轮，不执行补单")
-                    # 延迟统计更新
-                    self.completed_order_ids.append(buy_order_id)
                     
                     # 取消卖单
                     self.cancel_order(sell_order_id)
@@ -1982,10 +2008,9 @@ class VolumeStrategy:
                     self.completed_rounds += 1
                     return True
                 else:
-                    # 非最后一轮，执行卖出补单
-                    self.log("📉 买单成交，卖单未成交 - 执行卖出补单")
-                    # 延迟统计更新
-                    self.completed_order_ids.append(buy_order_id)
+                    # 非最后一轮，执行卖出补单 - 只补买入的实际数量
+                    补单数量 = buy_executed_qty
+                    self.log(f"📉 买单成交，卖单未成交 - 执行卖出补单（补{补单数量}）")
                     
                     # 取消卖单
                     self.cancel_order(sell_order_id)
@@ -1996,9 +2021,9 @@ class VolumeStrategy:
                     if buy_order_id in self.pending_orders:
                         self.pending_orders.remove(buy_order_id)
                     
-                    # 市价卖出补单
+                    # 市价卖出补单 - 使用实际成交数量
                     time.sleep(0.5)
-                    success = self.place_market_sell_order(actual_quantity)
+                    success = self.place_market_sell_order(float(补单数量))
                     if success:
                         self.log("✅ 卖出补单成功")
                         self.supplement_orders += 1  # 增加补单计数
@@ -2012,6 +2037,52 @@ class VolumeStrategy:
                     else:
                         self.log("❌ 卖出补单失败", 'error')
                         return False
+            
+            elif buy_partial and sell_partial:
+                # 双边都是部分成交 - 需要根据差额补单
+                buy_order_details = self.get_order_details(buy_order_id)
+                sell_order_details = self.get_order_details(sell_order_id)
+                buy_executed_qty = Decimal(str(buy_order_details.get('executedQty', 0))) if buy_order_details else Decimal('0')
+                sell_executed_qty = Decimal(str(sell_order_details.get('executedQty', 0))) if sell_order_details else Decimal('0')
+                
+                self.log(f"⚠️ 双边部分成交 - 买:{buy_executed_qty} 卖:{sell_executed_qty}")
+                
+                # 加入统计
+                self.completed_order_ids.extend([buy_order_id, sell_order_id])
+                
+                # 取消未成交部分
+                self.cancel_order(buy_order_id)
+                self.cancel_order(sell_order_id)
+                
+                # 移除订单
+                if sell_order_id in self.pending_orders:
+                    self.pending_orders.remove(sell_order_id)
+                if buy_order_id in self.pending_orders:
+                    self.pending_orders.remove(buy_order_id)
+                
+                # 计算差额并补单
+                diff = buy_executed_qty - sell_executed_qty
+                if abs(diff) > Decimal('0.01'):  # 差额大于0.01才补单
+                    if diff > 0:
+                        # 买的多，需要卖出差额
+                        self.log(f"🔄 买多卖少，补卖 {diff}")
+                        time.sleep(0.5)
+                        success = self.place_market_sell_order(float(diff))
+                        if success:
+                            self.log("✅ 差额补单成功")
+                            self.supplement_orders += 1
+                    else:
+                        # 卖的多，需要买入差额
+                        self.log(f"🔄 卖多买少，补买 {abs(diff)}")
+                        time.sleep(0.5)
+                        success = self.place_market_buy_order(float(abs(diff)))
+                        if success:
+                            self.log("✅ 差额补单成功")
+                            self.supplement_orders += 1
+                
+                self.completed_rounds += 1
+                self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
+                return True
             
             else:
                 # 都未成交，取消订单
