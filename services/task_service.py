@@ -282,15 +282,24 @@ class TaskService:
             return False, f"删除任务失败: {str(e)}"
     
     @staticmethod
-    def get_task_logs(task_id: int, user_id: int) -> Tuple[bool, str, str]:
+    def get_task_logs(task_id: int, user_id: int = None) -> Tuple[bool, str, str]:
         """
         获取任务日志
+        
+        Args:
+            task_id: 任务ID
+            user_id: 用户ID，为None时不限制用户（管理员权限）
         
         Returns:
             (success, message, logs)
         """
         try:
-            task = Task.query.filter_by(id=task_id, user_id=user_id).first()
+            # 如果user_id为None（管理员），不限制用户
+            if user_id is None:
+                task = Task.query.filter_by(id=task_id).first()
+            else:
+                task = Task.query.filter_by(id=task_id, user_id=user_id).first()
+            
             if not task:
                 return False, "任务不存在", ""
             

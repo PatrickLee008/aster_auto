@@ -140,7 +140,11 @@ def resume_task(task_id):
 def get_task_logs(task_id):
     """获取任务日志API"""
     try:
-        success, message, logs = TaskService.get_task_logs(task_id, current_user.id)
+        # 管理员可以查看所有任务日志，普通用户只能查看自己的
+        if current_user.is_admin:
+            success, message, logs = TaskService.get_task_logs(task_id, None)  # None表示不限制用户
+        else:
+            success, message, logs = TaskService.get_task_logs(task_id, current_user.id)
         
         return jsonify({
             'success': success,
@@ -334,7 +338,12 @@ def clear_task_logs(task_id):
     """清除任务日志API"""
     try:
         from models.task import Task
-        task = Task.query.filter_by(id=task_id, user_id=current_user.id).first()
+        
+        # 管理员可以清除所有任务日志，普通用户只能清除自己的
+        if current_user.is_admin:
+            task = Task.query.filter_by(id=task_id).first()
+        else:
+            task = Task.query.filter_by(id=task_id, user_id=current_user.id).first()
         
         if not task:
             return jsonify({
