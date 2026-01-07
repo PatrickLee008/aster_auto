@@ -93,14 +93,16 @@ class SmartproxyManager:
             return None
     
     def _create_residential_proxy(self, task_id: int) -> Dict:
-        """创建住宅代理（美国纽约粘性会话）"""
-        # 基于decodo官方格式，动态创建美国纽约IP
-        # 格式：username-country-city-session-sessionID
+        """创建住宅代理（优先使用简单格式，降级到地区指定）"""
         session_id = f"task{task_id:04d}"
         
-        # Smartproxy官方格式：user-username-country-us-city-newyork-session-sessionid
-        # 指定纽约市，网络质量好且交易所支持
-        username_with_location = f"user-{self.base_username}-country-us-city-newyork-session-{session_id}"
+        # 优先使用不指定地区的格式，如果连接失败再考虑指定地区
+        # 格式1: user-username-session-sessionid (简单格式，通常更稳定)
+        # 格式2: user-username-country-us-session-sessionid (指定国家)
+        # 格式3: user-username-country-us-city-newyork-session-sessionid (指定城市，可能连接问题)
+        
+        # 使用简单格式，让代理服务商自动分配最优IP
+        username_with_location = f"user-{self.base_username}-session-{session_id}"
         
         return {
             'proxy_type': 'residential',
@@ -109,12 +111,12 @@ class SmartproxyManager:
             'port': self.residential_port,      # 10001
             'username': username_with_location,  # user-sp9y3nhxbw-country-us-city-newyork-session-taskXXXX
             'password': self.password,          # ez8m5F~gl6jG9snvPU
-            'country': 'US',
-            'city': 'New York',  # 纽约
+            'country': 'Auto',  # 自动分配
+            'city': 'Auto',     # 自动分配
             'task_id': task_id,
             'session_id': session_id,
             'sticky_duration': f'{self.session_duration}min',
-            'display_info': f"美国纽约住宅IP (会话: {session_id}, {self.session_duration}分钟)"
+            'display_info': f"住宅IP自动分配 (会话: {session_id}, {self.session_duration}分钟)"
         }
     
     def _create_datacenter_proxy(self, task_id: int) -> Dict:

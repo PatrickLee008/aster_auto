@@ -1249,42 +1249,28 @@ class VolumeStrategy:
         except Exception as e:
             self.log(f"❌ 更新交易统计时出错: {e}", "error")
     
-    def _calculate_fee_from_order_result(self, order_result: dict, is_maker: bool = False) -> float:
-        """从订单结果计算手续费(USDT)，使用真实的API费率"""
+    def _calculate_fee_from_order_result(self, order_result: dict, is_buy_side: bool = True) -> float:
+        """从订单结果计算手续费(USDT)，使用新的费率公式：买单万分之4，卖单万分之4×1/8"""
         try:
-            # 尝试从订单结果中获取手续费信息
             if isinstance(order_result, dict):
-                # 检查是否有commission字段
-                commission = order_result.get('commission', 0)
-                commission_asset = order_result.get('commissionAsset', '')
-                
-                if commission > 0:
-                    if commission_asset == 'USDT':
-                        self.log(f"💰 API返回真实手续费: {commission} USDT")
-                        return float(commission)
-                    else:
-                        # 如果手续费不是USDT，需要转换，暂时跳过转换逻辑
-                        self.log(f"⚠️ 手续费资产为 {commission_asset}，无法直接转换为USDT，使用费率计算", "warning")
-                
-                # 如果没有commission字段或需要转换，使用真实费率计算
                 executed_qty = float(order_result.get('executedQty', 0))
                 avg_price = float(order_result.get('avgPrice', 0))
+                side = order_result.get('side', '').upper()
                 
                 if executed_qty > 0 and avg_price > 0:
                     trade_value = executed_qty * avg_price
                     
-                    # 确保已获取费率信息
-                    if not self.fee_rates_loaded:
-                        self.get_commission_rates()
+                    # 根据订单方向确定费率
+                    if side == 'BUY' or is_buy_side:
+                        # 买单：万分之4
+                        fee_rate = 0.0004
+                        fee_type = "买单"
+                    else:
+                        # 卖单：万分之4 × 1/8
+                        fee_rate = 0.0004 * 0.125
+                        fee_type = "卖单"
                     
-                    # 根据是否为maker选择费率
-                    fee_rate = self.maker_fee_rate if is_maker else self.taker_fee_rate
-                    
-                    # 计算手续费
                     calculated_fee = trade_value * fee_rate
-                    
-                    fee_type = "Maker" if is_maker else "Taker"
-                    # 手续费已计算
                     
                     return calculated_fee
             
@@ -1294,15 +1280,18 @@ class VolumeStrategy:
             self.log(f"❌ 计算手续费时出错: {e}", "error")
             return 0.0
     
-    def _calculate_fee(self, quantity: float, price: float, is_maker: bool = False) -> float:
+    def _calculate_fee(self, quantity: float, price: float, is_buy_side: bool = True) -> float:
         """快速计算手续费（用于双向成交的快速统计）"""
         try:
-            # 确保已获取费率信息
-            if not self.fee_rates_loaded:
-                self.get_commission_rates()
-            
             trade_value = quantity * price
-            fee_rate = self.maker_fee_rate if is_maker else self.taker_fee_rate
+            
+            # 根据买卖方向确定费率
+            if is_buy_side:
+                # 买单：万分之4
+                fee_rate = 0.0004
+            else:
+                # 卖单：万分之4 × 1/8
+                fee_rate = 0.0004 * 0.125
             
             return trade_value * fee_rate
         except Exception as e:
@@ -1338,7 +1327,8 @@ class VolumeStrategy:
                                     is_maker = order_info.get('isMaker', True)
                                     
                                     # 计算手续费并更新统计
-                                    fee = self._calculate_fee_from_order_result(order_info, is_maker=is_maker)
+                                    is_buy_side = side == 'BUY'
+                                    fee = self._calculate_fee_from_order_result(order_info, is_buy_side=is_buy_side)
                                     self._update_trade_statistics(side, executed_qty, avg_price, fee)
                                     
                                     # 标记为已处理
@@ -1387,8 +1377,8 @@ class VolumeStrategy:
                         avg_price = float(order_info.get('avgPrice', 0))
                         
                         if executed_qty > 0 and avg_price > 0:
-                            # 计算手续费 (市价单通常是taker)
-                            fee = self._calculate_fee_from_order_result(order_info, is_maker=False)
+                            # 计算手续费 (买单)
+                            fee = self._calculate_fee_from_order_result(order_info, is_buy_side=True)
                             # 更新统计数据
                             self._update_trade_statistics('BUY', executed_qty, avg_price, fee)
                     else:
@@ -1397,10 +1387,8 @@ class VolumeStrategy:
                         if ticker:
                             estimated_price = float(ticker.get('askPrice', 0))
                             if estimated_price > 0:
-                                # 确保费率已加载
-                                if self.taker_fee_rate is None:
-                                    self.get_commission_rates()
-                                fee = adjusted_quantity * estimated_price * (self.taker_fee_rate or 0.0004)
+                                # 买单使用万分之4费率
+                                fee = adjusted_quantity * estimated_price * 0.0004
                                 self._update_trade_statistics('BUY', adjusted_quantity, estimated_price, fee)
                 else:
                     # 备用方案：使用当前市价估算
@@ -1408,10 +1396,8 @@ class VolumeStrategy:
                     if ticker:
                         estimated_price = float(ticker.get('askPrice', 0))
                         if estimated_price > 0:
-                            # 确保费率已加载
-                            if self.taker_fee_rate is None:
-                                self.get_commission_rates()
-                            fee = adjusted_quantity * estimated_price * (self.taker_fee_rate or 0.0004)
+                            # 买单使用万分之4费率
+                            fee = adjusted_quantity * estimated_price * 0.0004
                             self._update_trade_statistics('BUY', adjusted_quantity, estimated_price, fee)
                 
                 return result
@@ -1466,8 +1452,8 @@ class VolumeStrategy:
                         avg_price = float(order_info.get('avgPrice', 0))
                         
                         if executed_qty > 0 and avg_price > 0:
-                            # 计算手续费 (市价单通常是taker)
-                            fee = self._calculate_fee_from_order_result(order_info, is_maker=False)
+                            # 计算手续费 (卖单)
+                            fee = self._calculate_fee_from_order_result(order_info, is_buy_side=False)
                             # 更新统计数据
                             self._update_trade_statistics('SELL', executed_qty, avg_price, fee)
                     else:
@@ -1476,10 +1462,8 @@ class VolumeStrategy:
                         if ticker:
                             estimated_price = float(ticker.get('bidPrice', 0))
                             if estimated_price > 0:
-                                # 确保费率已加载
-                                if self.taker_fee_rate is None:
-                                    self.get_commission_rates()
-                                fee = adjusted_quantity * estimated_price * (self.taker_fee_rate or 0.0004)
+                                # 卖单使用万分之4×1/8费率
+                                fee = adjusted_quantity * estimated_price * (0.0004 * 0.125)
                                 self._update_trade_statistics('SELL', adjusted_quantity, estimated_price, fee)
                 else:
                     # 备用方案：使用当前市价估算
@@ -1487,10 +1471,8 @@ class VolumeStrategy:
                     if ticker:
                         estimated_price = float(ticker.get('bidPrice', 0))
                         if estimated_price > 0:
-                            # 确保费率已加载
-                            if self.taker_fee_rate is None:
-                                self.get_commission_rates()
-                            fee = adjusted_quantity * estimated_price * (self.taker_fee_rate or 0.0004)
+                            # 卖单使用万分之4×1/8费率
+                            fee = adjusted_quantity * estimated_price * (0.0004 * 0.125)
                             self._update_trade_statistics('SELL', adjusted_quantity, estimated_price, fee)
                 
                 return result
@@ -1915,14 +1897,14 @@ class VolumeStrategy:
                     
                     # 双向成交更新统计（使用下单价格快速计算）
                     if buy_order_id not in self.processed_orders:
-                        # 买单使用Taker费率（吃单）
-                        buy_fee = self._calculate_fee(quantity, buy_price, is_maker=False)
+                        # 买单费率计算
+                        buy_fee = self._calculate_fee(quantity, buy_price, is_buy_side=True)
                         self._update_trade_statistics('BUY', quantity, buy_price, buy_fee)
                         self.processed_orders.add(buy_order_id)
                     
                     if sell_order_id not in self.processed_orders:
-                        # 卖单使用Taker费率（吃单）
-                        sell_fee = self._calculate_fee(quantity, sell_price, is_maker=False)
+                        # 卖单费率计算
+                        sell_fee = self._calculate_fee(quantity, sell_price, is_buy_side=False)
                         self._update_trade_statistics('SELL', quantity, sell_price, sell_fee)
                         self.processed_orders.add(sell_order_id)
                     
@@ -1955,7 +1937,7 @@ class VolumeStrategy:
                     if sell_order_id not in self.processed_orders:
                         sell_avg_price = float(sell_order_details.get('avgPrice', 0))
                         sell_is_maker = sell_order_details.get('isMaker', True)
-                        sell_fee = self._calculate_fee_from_order_result(sell_order_details, is_maker=sell_is_maker)
+                        sell_fee = self._calculate_fee_from_order_result(sell_order_details, is_buy_side=False)
                         self._update_trade_statistics('SELL', float(sell_executed_qty), sell_avg_price, sell_fee)
                         self.processed_orders.add(sell_order_id)
                         
@@ -1969,7 +1951,7 @@ class VolumeStrategy:
                     if buy_order_id not in self.processed_orders:
                         buy_avg_price = float(buy_order_details.get('avgPrice', 0))
                         buy_is_maker = buy_order_details.get('isMaker', True)
-                        buy_fee = self._calculate_fee_from_order_result(buy_order_details, is_maker=buy_is_maker)
+                        buy_fee = self._calculate_fee_from_order_result(buy_order_details, is_buy_side=True)
                         self._update_trade_statistics('BUY', float(buy_executed_qty), buy_avg_price, buy_fee)
                         self.processed_orders.add(buy_order_id)
                         
@@ -2043,7 +2025,7 @@ class VolumeStrategy:
                     if buy_order_id not in self.processed_orders:
                         buy_avg_price = float(buy_order_details.get('avgPrice', 0))
                         buy_is_maker = buy_order_details.get('isMaker', True)
-                        buy_fee = self._calculate_fee_from_order_result(buy_order_details, is_maker=buy_is_maker)
+                        buy_fee = self._calculate_fee_from_order_result(buy_order_details, is_buy_side=True)
                         self._update_trade_statistics('BUY', float(buy_executed_qty), buy_avg_price, buy_fee)
                         self.processed_orders.add(buy_order_id)
                         
@@ -2057,7 +2039,7 @@ class VolumeStrategy:
                     if sell_order_id not in self.processed_orders:
                         sell_avg_price = float(sell_order_details.get('avgPrice', 0))
                         sell_is_maker = sell_order_details.get('isMaker', True)
-                        sell_fee = self._calculate_fee_from_order_result(sell_order_details, is_maker=sell_is_maker)
+                        sell_fee = self._calculate_fee_from_order_result(sell_order_details, is_buy_side=False)
                         self._update_trade_statistics('SELL', float(sell_executed_qty), sell_avg_price, sell_fee)
                         self.processed_orders.add(sell_order_id)
                         
@@ -2281,10 +2263,17 @@ class VolumeStrategy:
             
             # 新增交易量和手续费统计
             total_volume = self.buy_volume_usdt + self.sell_volume_usdt
+            
+            # 重新计算手续费：买单 * 万分之4 + 卖单 * 万分之4 * 1/8
+            calculated_total_fees = self.buy_volume_usdt * 0.0004 + self.sell_volume_usdt * 0.0004 * 0.125
+            self.total_fees_usdt = calculated_total_fees  # 更新总手续费
+            
             self.log(f"\n=== 交易统计 ===")
             self.log(f"买单总交易量: {self.buy_volume_usdt:.2f} {self.quote_asset}")
             self.log(f"卖单总交易量: {self.sell_volume_usdt:.2f} {self.quote_asset}") 
             self.log(f"总交易量: {total_volume:.2f} {self.quote_asset}")
+            self.log(f"买单手续费: {self.buy_volume_usdt * 0.0004:.4f} {self.quote_asset} (万分之4)")
+            self.log(f"卖单手续费: {self.sell_volume_usdt * 0.0004 * 0.125:.4f} {self.quote_asset} (万分之4×1/8)")
             self.log(f"总手续费: {self.total_fees_usdt:.4f} {self.quote_asset}")
             
             self.log(f"\n=== {self.quote_asset}余额分析 ===")
