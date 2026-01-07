@@ -164,15 +164,31 @@ class SmartproxyManager:
             
             if response.status_code == 200:
                 ip_info = response.json()
-                current_ip = ip_info.get('ip', 'unknown')
-                country = ip_info.get('country', {}).get('name', 'Unknown') if isinstance(ip_info.get('country'), dict) else str(ip_info.get('country', 'Unknown'))
-                region = ip_info.get('region', 'Unknown')
+                
+                # Decodo API 的 IP 在 proxy.ip 字段，不是顶层的 ip 字段
+                current_ip = ip_info.get('proxy', {}).get('ip', 'unknown')
+                
+                # 获取国家信息
+                country = ip_info.get('country', {})
+                if isinstance(country, dict):
+                    country_name = country.get('name', 'Unknown')
+                else:
+                    country_name = str(country)
+                
+                # 获取地区信息（城市和州）
+                city = ip_info.get('city', {})
+                if isinstance(city, dict):
+                    city_name = city.get('name', 'Unknown')
+                    state_name = city.get('state', 'Unknown')
+                    region = f"{city_name}, {state_name}"
+                else:
+                    region = ip_info.get('region', 'Unknown')
                 
                 proxy_config['current_ip'] = current_ip
-                proxy_config['actual_country'] = country
+                proxy_config['actual_country'] = country_name
                 proxy_config['actual_region'] = region
                 
-                self.logger.info(f"✅ 代理测试成功 - IP: {current_ip}, 位置: {region}, {country}")
+                self.logger.info(f"✅ 代理测试成功 - IP: {current_ip}, 位置: {region}, {country_name}")
                 return True
             else:
                 self.logger.warning(f"❌ 代理测试HTTP错误: {response.status_code}")

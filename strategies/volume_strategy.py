@@ -1294,6 +1294,21 @@ class VolumeStrategy:
             self.log(f"❌ 计算手续费时出错: {e}", "error")
             return 0.0
     
+    def _calculate_fee(self, quantity: float, price: float, is_maker: bool = False) -> float:
+        """快速计算手续费（用于双向成交的快速统计）"""
+        try:
+            # 确保已获取费率信息
+            if not self.fee_rates_loaded:
+                self.get_commission_rates()
+            
+            trade_value = quantity * price
+            fee_rate = self.maker_fee_rate if is_maker else self.taker_fee_rate
+            
+            return trade_value * fee_rate
+        except Exception as e:
+            self.log(f"❌ 快速计算手续费时出错: {e}", "error")
+            return 0.0
+    
     def _batch_update_statistics(self):
         """批量更新统计数据 - API优化版本"""
         if not self.completed_order_ids:
@@ -1805,42 +1820,28 @@ class VolumeStrategy:
     def execute_round(self, round_num: int) -> bool:
         """执行一轮交易"""
         self.log(f"\n=== 第 {round_num}/{self.rounds} 轮交易 ===")
-        self.log(f"开始执行第 {round_num} 轮交易", 'info')
         
-        # 每10轮执行一次自适应调节 - 方案3优化
+        # 每10轮执行一次自适应调节
         if round_num % 10 == 1:
             self._auto_adjust_parameters()
         
         # 智能余额检查：先清理订单释放资金，再获取真实可用余额
         available_balance = self.smart_balance_check()
         
-        # 基于实际余额动态计算交易数量（而非固定数量）
-        base_quantity = float(self.quantity)  # 基础参考数量
-        safety_margin = 0.2  # 安全边际：保留0.2个币
-        
-        # 计算本轮实际可用数量
+        # 基于实际余额动态计算交易数量
+        base_quantity = float(self.quantity)
+        safety_margin = 0.2
         max_usable = available_balance - safety_margin
         actual_quantity = min(base_quantity, max_usable)
         
-        self.log(f"💰 本轮交易数量计算:")
-        self.log(f"  可用余额: {available_balance:.2f}")
-        self.log(f"  安全边际: {safety_margin:.2f}")
-        self.log(f"  基础数量: {base_quantity:.2f}")
-        self.log(f"  实际数量: {actual_quantity:.2f}")
+        self.log(f"💰 余额: {available_balance:.2f}, 使用数量: {actual_quantity:.2f}")
         
         if actual_quantity < 1.0:
-            self.log(f"⚠️ 余额过低，本轮实际可用数量不足1.0: {actual_quantity:.2f}", "warning")
-            self.log(f"❌ 触发自动补货...", "warning")
-            
-            # 余额不足就触发补货
+            self.log(f"⚠️ 余额不足，触发自动补货...")
             if self.auto_purchase_if_insufficient():
-                self.log(f"✅ 补货成功，重新计算交易数量")
-                # 重新获取余额并计算
                 available_balance = self.smart_balance_check()
                 max_usable = available_balance - safety_margin
                 actual_quantity = min(base_quantity, max_usable)
-                self.log(f"✅ 补货后可用数量: {actual_quantity:.2f}")
-                
                 if actual_quantity < 1.0:
                     self.log(f"❌ 补货后余额仍不足，跳过本轮", "error")
                     return False
@@ -1848,39 +1849,22 @@ class VolumeStrategy:
                 self.log(f"❌ 补货失败，跳过本轮", "error")
                 return False
         
-        # 确保使用标准化的实际数量
-        self.log(f"✅ 本轮使用交易数量: {actual_quantity:.2f}")
-        
         # 初始化本轮状态
         round_completed = False
         
         try:
-            # 使用策略开始时记录的初始余额作为基准
-            initial_balance = self.initial_balance
-            
-            # 强制日志：关键检查点
-            self.log(f"=== 第{round_num}轮: 开始获取订单薄 ===", 'info')
-            
-            # 1. 获取当前订单薄
+            # 获取订单薄并执行优化交易
             book_data = self.get_order_book()
             if not book_data:
-                self.log("无法获取订单薄，跳过本轮", 'error')
+                self.log("❌ 无法获取订单薄", 'error')
                 return False
-            
-            self.log(f"=== 第{round_num}轮: 订单薄获取成功，开始生成价格 ===", 'info')
-            
-            # 2. 使用优化策略执行交易
-            self.log(f"=== 第{round_num}轮: 启用优化交易策略 ===", 'info')
             
             # 执行优化的交易轮次
             sell_order, buy_order = self.execute_optimized_round(actual_quantity)
             
             if not sell_order or not buy_order:
-                self.log(f"❌ 优化策略执行失败，跳过本轮", 'error')
+                self.log(f"❌ 下单失败", 'error')
                 return False
-            
-            # 强制日志：订单已提交
-            self.log(f"=== 第{round_num}轮: 优化订单已提交，开始监控 ===", 'info')
             
             import time
             start_time = time.time()
@@ -1895,10 +1879,7 @@ class VolumeStrategy:
             if buy_order_id:
                 self.pending_orders.append(buy_order_id)
             
-            self.log(f"✅ 优化策略订单提交成功 - 卖出:{sell_order_id} 买入:{buy_order_id}")
-            
-            # 优化策略订单监控
-            self.log(f"=== 第{round_num}轮: 开始监控优化订单 ===", 'info')
+            self.log(f"✅ 订单已提交 - 卖:{sell_order_id} 买:{buy_order_id}")
             
             # 等待订单成交
             time.sleep(self.order_check_timeout)
@@ -1908,12 +1889,12 @@ class VolumeStrategy:
                 order_statuses = self.check_multiple_order_status([buy_order_id, sell_order_id])
                 buy_status = order_statuses.get(str(buy_order_id), 'UNKNOWN')
                 sell_status = order_statuses.get(str(sell_order_id), 'UNKNOWN')
-                self.log(f"批量查询订单状态 - 买入: {buy_status}, 卖出: {sell_status}")
+
             else:
                 # 降级到单个查询
                 buy_status = self.check_order_status(buy_order_id) if buy_order_id else 'UNKNOWN'
                 sell_status = self.check_order_status(sell_order_id) if sell_order_id else 'UNKNOWN'
-                self.log(f"单独查询订单状态 - 买入: {buy_status}, 卖出: {sell_status}")
+                self.log(f"📊 订单状态 - 买:{buy_status} 卖:{sell_status}")
             
             # 分析成交情况 - 需要同时考虑 FILLED 和 PARTIALLY_FILLED
             buy_filled = buy_status == 'FILLED'
@@ -1922,53 +1903,41 @@ class VolumeStrategy:
             sell_partial = sell_status == 'PARTIALLY_FILLED'
             
             if buy_filled and sell_filled:
-                # 双向成交 - 优化策略的目标结果
-                self.log("🎯 优化策略成功！双向订单都已成交")
+                # 双向成交 - 快速统计
                 
-                # 立即更新统计数据，不延迟
+                # 优化：双向成交使用下单信息快速统计，无需额外API调用
                 try:
-                    # 获取订单详情并立即更新统计
-                    buy_order_details = self.get_order_details(buy_order_id)
-                    sell_order_details = self.get_order_details(sell_order_id)
+                    # 从下单响应中获取价格和数量（双向成交时价格相同）
+                    sell_price = float(sell_order.get('price', 0))
+                    buy_price = float(buy_order.get('price', 0))
+                    quantity = float(actual_quantity)
                     
-                    if buy_order_details and sell_order_details:
-                        # 更新买单统计
-                        if buy_order_id not in self.processed_orders:
-                            buy_executed_qty = float(buy_order_details.get('executedQty', 0))
-                            buy_avg_price = float(buy_order_details.get('avgPrice', 0))
-                            buy_is_maker = buy_order_details.get('isMaker', True)
-                            buy_fee = self._calculate_fee_from_order_result(buy_order_details, is_maker=buy_is_maker)
-                            self._update_trade_statistics('BUY', buy_executed_qty, buy_avg_price, buy_fee)
-                            self.processed_orders.add(buy_order_id)
-                        
-                        # 更新卖单统计
-                        if sell_order_id not in self.processed_orders:
-                            sell_executed_qty = float(sell_order_details.get('executedQty', 0))
-                            sell_avg_price = float(sell_order_details.get('avgPrice', 0))
-                            sell_is_maker = sell_order_details.get('isMaker', True)
-                            sell_fee = self._calculate_fee_from_order_result(sell_order_details, is_maker=sell_is_maker)
-                            self._update_trade_statistics('SELL', sell_executed_qty, sell_avg_price, sell_fee)
-                            self.processed_orders.add(sell_order_id)
-                        
-                        self.log("📊 订单统计已实时更新")
+                    # 双向成交更新统计（使用下单价格快速计算）
+                    if buy_order_id not in self.processed_orders:
+                        # 买单使用Taker费率（吃单）
+                        buy_fee = self._calculate_fee(quantity, buy_price, is_maker=False)
+                        self._update_trade_statistics('BUY', quantity, buy_price, buy_fee)
+                        self.processed_orders.add(buy_order_id)
+                    
+                    if sell_order_id not in self.processed_orders:
+                        # 卖单使用Taker费率（吃单）
+                        sell_fee = self._calculate_fee(quantity, sell_price, is_maker=False)
+                        self._update_trade_statistics('SELL', quantity, sell_price, sell_fee)
+                        self.processed_orders.add(sell_order_id)
+                    
+
                 except Exception as e:
-                    self.log(f"⚠️ 实时更新统计失败: {e}", "warning")
+                    self.log(f"⚠️ 快速统计失败: {e}", "warning")
                 
-                # 从跟踪列表移除
+                # 从跟踪列表移除并完成轮次
                 if buy_order_id in self.pending_orders:
                     self.pending_orders.remove(buy_order_id)
                 if sell_order_id in self.pending_orders:
                     self.pending_orders.remove(sell_order_id)
                 
-                # 标记轮次完成
-                round_completed = True
                 self.completed_rounds += 1
-                
-                # 双向成交后的轻量级检查：只检查本地状态
-                self.log(f"🔍 双向成交后执行状态检查...")
                 self._enforce_round_cleanup(round_num, skip_heavy_checks=True)
-                
-                self.log(f"✅ 第 {round_num} 轮交易完成 (优化策略成功)")
+                self.log(f"✅ 第 {round_num} 轮完成")
                 return True
                 
             elif (sell_filled or sell_partial) and not buy_filled:
@@ -1990,9 +1959,9 @@ class VolumeStrategy:
                         self.processed_orders.add(sell_order_id)
                         
                         if sell_partial:
-                            self.log(f"⚠️ 卖单部分成交: 已成交 {sell_executed_qty}/{actual_quantity}, 统计已更新")
+                            self.log(f"⚠️ 卖单部分成交 {sell_executed_qty}/{actual_quantity}")
                         else:
-                            self.log(f"✅ 卖单完全成交: {sell_executed_qty}, 统计已更新")
+                            self.log(f"✅ 卖单已成交 {sell_executed_qty}")
                 
                 # 检查买单成交情况并更新统计
                 if buy_order_details and buy_executed_qty > 0:
@@ -2004,9 +1973,9 @@ class VolumeStrategy:
                         self.processed_orders.add(buy_order_id)
                         
                         if buy_partial:
-                            self.log(f"⚠️ 买单部分成交: 已成交 {buy_executed_qty}/{actual_quantity}, 统计已更新")
+                            self.log(f"⚠️ 买单部分成交 {buy_executed_qty}/{actual_quantity}")
                         elif buy_executed_qty > 0:
-                            self.log(f"✅ 买单已成交: {buy_executed_qty}, 统计已更新")
+                            self.log(f"✅ 买单已成交 {buy_executed_qty}")
                 
                 # 检查是否为最后一轮
                 if round_num == self.rounds:
@@ -2078,9 +2047,9 @@ class VolumeStrategy:
                         self.processed_orders.add(buy_order_id)
                         
                         if buy_partial:
-                            self.log(f"⚠️ 买单部分成交: 已成交 {buy_executed_qty}/{actual_quantity}, 统计已更新")
+                            self.log(f"⚠️ 买单部分成交 {buy_executed_qty}/{actual_quantity}")
                         else:
-                            self.log(f"✅ 买单完全成交: {buy_executed_qty}, 统计已更新")
+                            self.log(f"✅ 买单已成交 {buy_executed_qty}")
                 
                 # 检查卖单成交情况并更新统计
                 if sell_order_details and sell_executed_qty > 0:
@@ -2092,9 +2061,9 @@ class VolumeStrategy:
                         self.processed_orders.add(sell_order_id)
                         
                         if sell_partial:
-                            self.log(f"⚠️ 卖单部分成交: 已成交 {sell_executed_qty}/{actual_quantity}, 统计已更新")
+                            self.log(f"⚠️ 卖单部分成交 {sell_executed_qty}/{actual_quantity}")
                         elif sell_executed_qty > 0:
-                            self.log(f"✅ 卖单已成交: {sell_executed_qty}, 统计已更新")
+                            self.log(f"✅ 卖单已成交 {sell_executed_qty}")
                 
                 # 检查是否为最后一轮
                 if round_num == self.rounds:
