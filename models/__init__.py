@@ -7,5 +7,6 @@ from .user import User
 from .wallet import Wallet
 from .strategy import Strategy
 from .task import Task
+from .system_config import SystemConfig
 
-__all__ = ['User', 'Wallet', 'Strategy', 'Task']
+__all__ = ['User', 'Wallet', 'Strategy', 'Task', 'SystemConfig']

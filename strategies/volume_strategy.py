@@ -1889,12 +1889,12 @@ class VolumeStrategy:
                 order_statuses = self.check_multiple_order_status([buy_order_id, sell_order_id])
                 buy_status = order_statuses.get(str(buy_order_id), 'UNKNOWN')
                 sell_status = order_statuses.get(str(sell_order_id), 'UNKNOWN')
-
             else:
                 # 降级到单个查询
                 buy_status = self.check_order_status(buy_order_id) if buy_order_id else 'UNKNOWN'
                 sell_status = self.check_order_status(sell_order_id) if sell_order_id else 'UNKNOWN'
-                self.log(f"📊 订单状态 - 买:{buy_status} 卖:{sell_status}")
+            
+            self.log(f"📊 订单状态 - 买:{buy_status} 卖:{sell_status}")
             
             # 分析成交情况 - 需要同时考虑 FILLED 和 PARTIALLY_FILLED
             buy_filled = buy_status == 'FILLED'
@@ -1904,6 +1904,7 @@ class VolumeStrategy:
             
             if buy_filled and sell_filled:
                 # 双向成交 - 快速统计
+                self.log("🎯 双向成交成功！")
                 
                 # 优化：双向成交使用下单信息快速统计，无需额外API调用
                 try:

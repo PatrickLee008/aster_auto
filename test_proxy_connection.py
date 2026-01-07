@@ -66,18 +66,35 @@ def test_proxy():
             
             try:
                 ip_info = response.json()
-                current_ip = ip_info.get('ip', 'unknown')
+                
+                # Decodo API 的 IP 在 proxy.ip 字段
+                current_ip = ip_info.get('proxy', {}).get('ip', 'unknown')
+                
+                # 获取国家信息
                 country = ip_info.get('country', {})
                 if isinstance(country, dict):
                     country_name = country.get('name', 'Unknown')
                 else:
                     country_name = str(country)
-                region = ip_info.get('region', 'Unknown')
+                
+                # 获取城市和州信息
+                city = ip_info.get('city', {})
+                if isinstance(city, dict):
+                    city_name = city.get('name', 'Unknown')
+                    state_name = city.get('state', 'Unknown')
+                    region = f"{city_name}, {state_name}"
+                else:
+                    region = ip_info.get('region', 'Unknown')
+                
+                # 获取ISP信息
+                isp = ip_info.get('isp', {})
+                isp_name = isp.get('isp', 'Unknown') if isinstance(isp, dict) else 'Unknown'
                 
                 print(f"📊 代理信息:")
                 print(f"   IP地址: {current_ip}")
                 print(f"   国家: {country_name}")
                 print(f"   地区: {region}")
+                print(f"   ISP: {isp_name}")
                 print()
                 print(f"📄 完整响应:")
                 print(response.text)

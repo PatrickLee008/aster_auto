@@ -14,6 +14,7 @@ from flask_login import LoginManager
 from models.base import db
 from models import User
 from controllers import auth_bp, wallet_bp, task_bp, main_bp, users_bp
+from routes.config import config_bp
 from services import AuthService, StrategyService
 
 
@@ -87,6 +88,7 @@ def register_blueprints(app):
     app.register_blueprint(auth_bp)
     app.register_blueprint(wallet_bp)
     app.register_blueprint(task_bp)
+    app.register_blueprint(config_bp)
     
     # 注册用户管理蓝图
     if users_bp:

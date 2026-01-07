@@ -77,12 +77,28 @@ def run_task(task_id: int):
                 return
             
             # 准备钱包配置（支持任务级代理）
-            # 优先使用 Smartproxy 任务级代理，如果未启用则回退到全局代理
+            # 优先读取数据库配置，如果未设置则回退到环境变量
+            from models import SystemConfig
             from utils.smartproxy_manager import get_task_proxy_config
             from utils.proxy_config import is_proxy_enabled, get_proxy_info
             
+            # 从数据库读取Smartproxy开关（优先级最高）
+            smartproxy_db_enabled = SystemConfig.get_value('smartproxy_enabled', None)
+            
+            # 如果数据库有配置，使用数据库配置；否则使用环境变量
+            if smartproxy_db_enabled is not None:
+                smartproxy_enabled = smartproxy_db_enabled
+                logger.info(f"🔧 使用数据库配置: Smartproxy={smartproxy_enabled}")
+            else:
+                # 回退到环境变量（首次运行或未设置时）
+                from config_env import get_env_bool
+                smartproxy_enabled = get_env_bool('SMARTPROXY_ENABLED', False)
+                logger.info(f"🔧 使用环境变量配置: Smartproxy={smartproxy_enabled}")
+            
             # 尝试获取任务级代理配置
-            task_proxy = get_task_proxy_config(task_id, 'residential')
+            task_proxy = None
+            if smartproxy_enabled:
+                task_proxy = get_task_proxy_config(task_id, 'residential')
             
             if task_proxy and task_proxy.get('proxy_enabled'):
                 # 使用任务级代理（Smartproxy）
