@@ -549,28 +549,32 @@ class VolumeStrategy:
             self.log(f"⚠️ 无法检查{self.quote_asset}余额: {e}")
             # 继续执行，让API返回具体错误
         
-        # 同时提交买卖单（不同价格）
-        import concurrent.futures
-        
+        # 顺序提交：先卖单，等10ms后买单
         sell_order = None
         buy_order = None
         
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                # 完全同时提交买卖单（无延迟）
-                self.log(f"⚡ 提交订单:")
-                self.log(f"  💰 买单: 价格={buy_price:.6f}, 数量={actual_quantity:.1f}, 价值={buy_value:.2f}U")
-                self.log(f"  💰 卖单: 价格={sell_price:.6f}, 数量={actual_quantity:.1f}, 价值={sell_value:.2f}U")
-                sell_future = executor.submit(self.place_sell_order, sell_price, actual_quantity)
-                buy_future = executor.submit(self.place_buy_order, buy_price, actual_quantity)
+            self.log(f"⚡ 顺序提交订单:")
+            self.log(f"  💰 卖单: 价格={sell_price:.6f}, 数量={actual_quantity:.1f}, 价值={sell_value:.2f}U")
+            self.log(f"  💰 买单: 价格={buy_price:.6f}, 数量={actual_quantity:.1f}, 价值={buy_value:.2f}U (延迟10ms)")
+            
+            # 先提交卖单
+            sell_order = self.place_sell_order(sell_price, actual_quantity)
+            
+            if sell_order:
+                self.log(f"✅ 卖单提交成功: {sell_order.get('orderId')}")
                 
-                # 获取下单结果
-                try:
-                    sell_order = sell_future.result(timeout=10)
-                    buy_order = buy_future.result(timeout=10)
-                except Exception as e:
-                    self.log(f"❌ 下单异常: {e}", 'error')
-                    return None, None
+                # 等待10ms后提交买单
+                time.sleep(0.01)  # 10毫秒延迟
+                buy_order = self.place_buy_order(buy_price, actual_quantity)
+                
+                if buy_order:
+                    self.log(f"✅ 买单提交成功: {buy_order.get('orderId')}")
+                else:
+                    self.log(f"❌ 买单提交失败", 'error')
+            else:
+                self.log(f"❌ 卖单提交失败", 'error')
+                return None, None
                 
             if sell_order and buy_order:
                 self.log(f"✅ 买卖单提交成功 - 卖单:{sell_order.get('orderId')}, 买单:{buy_order.get('orderId')}")
