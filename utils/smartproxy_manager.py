@@ -93,28 +93,28 @@ class SmartproxyManager:
             return None
     
     def _create_residential_proxy(self, task_id: int) -> Dict:
-        """创建住宅代理（美国自动选择最优位置的粘性会话）"""
-        # 基于decodo官方格式，动态创建美国IP（不指定州，自动选择网络最优位置）
-        # 格式：username-country-session-sessionID
+        """创建住宅代理（美国纽约粘性会话）"""
+        # 基于decodo官方格式，动态创建美国纽约IP
+        # 格式：username-country-city-session-sessionID
         session_id = f"task{task_id:04d}"
         
-        # Smartproxy官方格式：user-username-country-us-session-sessionid
-        # 移除state参数，让系统自动选择美国内网络最优的位置
-        username_with_location = f"user-{self.base_username}-country-us-session-{session_id}"
+        # Smartproxy官方格式：user-username-country-us-city-newyork-session-sessionid
+        # 指定纽约市，网络质量好且交易所支持
+        username_with_location = f"user-{self.base_username}-country-us-city-newyork-session-{session_id}"
         
         return {
             'proxy_type': 'residential',
             'protocol': 'http',
             'host': self.residential_endpoint,  # gate.decodo.com
             'port': self.residential_port,      # 10001
-            'username': username_with_location,  # user-sp9y3nhxbw-country-us-session-taskXXXX
+            'username': username_with_location,  # user-sp9y3nhxbw-country-us-city-newyork-session-taskXXXX
             'password': self.password,          # ez8m5F~gl6jG9snvPU
             'country': 'US',
-            'state': None,  # 不指定州，自动选择最优位置
+            'city': 'New York',  # 纽约
             'task_id': task_id,
             'session_id': session_id,
             'sticky_duration': f'{self.session_duration}min',
-            'display_info': f"美国住宅IP (会话: {session_id}, {self.session_duration}分钟, 自动最优位置)"
+            'display_info': f"美国纽约住宅IP (会话: {session_id}, {self.session_duration}分钟)"
         }
     
     def _create_datacenter_proxy(self, task_id: int) -> Dict:
