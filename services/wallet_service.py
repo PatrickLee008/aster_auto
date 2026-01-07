@@ -418,50 +418,86 @@ class WalletService:
                 'futures': {'status': 'failed', 'usdt_balance': 'N/A', 'available_balance': 'N/A'}
             }
             
+            # 检查配置了哪些API
+            credentials = wallet.get_api_credentials()
+            has_spot_api = credentials.get('api_key') and credentials.get('secret_key')
+            has_futures_api = wallet.user_address and wallet.signer_address and credentials.get('private_key')
+            
             success_count = 0
-            total_tests = 2
+            total_tests = 0
             
-            # 测试现货连接
-            try:
-                spot_success, spot_balance = WalletService._test_spot_connection(wallet)
-                if spot_success and spot_balance:
-                    combined_balance['spot'] = {
-                        'status': 'success',
-                        'usdt_balance': spot_balance.get('usdt_balance', 0),
-                        'usdt_locked': spot_balance.get('usdt_locked', 0),
-                        'total_usdt': spot_balance.get('total_usdt', 0)
-                    }
-                    success_count += 1
-                else:
-                    combined_balance['spot']['status'] = 'failed'
-            except Exception as e:
-                print(f"现货测试失败: {e}")
-                combined_balance['spot']['status'] = 'error'
+            # 测试现货连接（仅当配置了现货API时）
+            if has_spot_api:
+                total_tests += 1
+                try:
+                    spot_success, spot_balance = WalletService._test_spot_connection(wallet)
+                    if spot_success and spot_balance:
+                        combined_balance['spot'] = {
+                            'status': 'success',
+                            'usdt_balance': spot_balance.get('usdt_balance', 0),
+                            'usdt_locked': spot_balance.get('usdt_locked', 0),
+                            'total_usdt': spot_balance.get('total_usdt', 0)
+                        }
+                        success_count += 1
+                    else:
+                        combined_balance['spot']['status'] = 'failed'
+                except Exception as e:
+                    print(f"现货测试失败: {e}")
+                    combined_balance['spot']['status'] = 'error'
+            else:
+                combined_balance['spot']['status'] = 'not_configured'
             
-            # 测试期货连接
-            try:
-                futures_success, futures_balance = WalletService._test_futures_connection(wallet)
-                if futures_success and futures_balance:
-                    combined_balance['futures'] = {
-                        'status': 'success',
-                        'usdt_balance': futures_balance.get('usdt_balance', 0),
-                        'available_balance': futures_balance.get('available_balance', 0),
-                        'cross_wallet_balance': futures_balance.get('cross_wallet_balance', 0),
-                        'unrealized_pnl': futures_balance.get('unrealized_pnl', 0)
-                    }
-                    success_count += 1
-                else:
-                    combined_balance['futures']['status'] = 'failed'
-            except Exception as e:
-                print(f"期货测试失败: {e}")
-                combined_balance['futures']['status'] = 'error'
+            # 测试期货连接（仅当配置了期货API时）
+            if has_futures_api:
+                total_tests += 1
+                try:
+                    futures_success, futures_balance = WalletService._test_futures_connection(wallet)
+                    if futures_success and futures_balance:
+                        combined_balance['futures'] = {
+                            'status': 'success',
+                            'usdt_balance': futures_balance.get('usdt_balance', 0),
+                            'available_balance': futures_balance.get('available_balance', 0),
+                            'cross_wallet_balance': futures_balance.get('cross_wallet_balance', 0),
+                            'unrealized_pnl': futures_balance.get('unrealized_pnl', 0)
+                        }
+                        success_count += 1
+                    else:
+                        combined_balance['futures']['status'] = 'failed'
+                except Exception as e:
+                    print(f"期货测试失败: {e}")
+                    combined_balance['futures']['status'] = 'error'
+            else:
+                combined_balance['futures']['status'] = 'not_configured'
             
             # 构造返回消息
+            if total_tests == 0:
+                return False, "未配置任何API", None
+            
             if success_count == 0:
-                return False, "现货和期货连接均失败", None
-            elif success_count == 1:
-                spot_status = "成功" if combined_balance['spot']['status'] == 'success' else "失败"
-                futures_status = "成功" if combined_balance['futures']['status'] == 'success' else "失败"
+                # 构造失败消息
+                failed_parts = []
+                if combined_balance['spot']['status'] in ['failed', 'error']:
+                    failed_parts.append("现货连接失败")
+                if combined_balance['futures']['status'] in ['failed', 'error']:
+                    failed_parts.append("期货连接失败")
+                return False, " | ".join(failed_parts) if failed_parts else "连接测试失败", None
+            
+            elif success_count < total_tests:
+                # 部分成功
+                status_parts = []
+                if combined_balance['spot']['status'] == 'not_configured':
+                    pass  # 不显示未配置的
+                elif combined_balance['spot']['status'] == 'success':
+                    status_parts.append("现货:成功")
+                else:
+                    status_parts.append("现货:失败")
+                
+                if combined_balance['futures']['status'] == 'not_configured':
+                    pass  # 不显示未配置的
+                elif combined_balance['futures']['status'] == 'success':
+                    status_parts.append("期货:成功")
+                else:
+                    status_parts.append("期货:失败")
                 
                 # 构造余额消息
                 balance_parts = []
@@ -472,14 +508,27 @@ class WalletService:
                     balance_parts.append(f"可用保证金: {combined_balance['futures']['available_balance']}")
                 
                 balance_msg = " | " + " | ".join(balance_parts) if balance_parts else ""
-                message = f"部分连接成功 (现货:{spot_status}, 期货:{futures_status}){balance_msg}"
+                message = f"部分连接成功 ({', '.join(status_parts)}){balance_msg}"
                 return True, message, combined_balance
             else:
-                # 两个都成功
-                balance_msg = (f" | 现货USDT: {combined_balance['spot']['usdt_balance']} | "
-                              f"合约USDT: {combined_balance['futures']['usdt_balance']} | "
-                              f"可用保证金: {combined_balance['futures']['available_balance']}")
-                return True, f"现货和期货连接均成功{balance_msg}", combined_balance
+                # 全部成功
+                balance_parts = []
+                if combined_balance['spot']['status'] == 'success':
+                    balance_parts.append(f"现货USDT: {combined_balance['spot']['usdt_balance']}")
+                if combined_balance['futures']['status'] == 'success':
+                    balance_parts.append(f"合约USDT: {combined_balance['futures']['usdt_balance']}")
+                    balance_parts.append(f"可用保证金: {combined_balance['futures']['available_balance']}")
+                
+                balance_msg = " | " + " | ".join(balance_parts) if balance_parts else ""
+                
+                success_apis = []
+                if combined_balance['spot']['status'] == 'success':
+                    success_apis.append("现货")
+                if combined_balance['futures']['status'] == 'success':
+                    success_apis.append("期货")
+                
+                api_list = "和".join(success_apis) if success_apis else ""
+                return True, f"{api_list}连接均成功{balance_msg}", combined_balance
                 
         except Exception as e:
             print(f"统一钱包连接测试失败: {e}")
