@@ -65,14 +65,27 @@ class SmartproxyManager:
                 raise ValueError(f"不支持的代理类型: {proxy_type}")
                 
             # 可选的代理连接测试（不影响代理分配）
-            if self._test_proxy_connection(proxy_config):
-                self.logger.info(f"任务 {task_id} 代理连接测试成功: {proxy_type}")
+            test_success = self._test_proxy_connection(proxy_config)
+            
+            if test_success:
+                # 测试成功，记录IP信息
+                current_ip = proxy_config.get('current_ip', 'unknown')
+                actual_country = proxy_config.get('actual_country', 'Unknown')
+                actual_region = proxy_config.get('actual_region', 'Unknown')
+                
+                self.logger.info(f"✅ 任务 {task_id} 代理连接测试成功")
+                self.logger.info(f"   代理类型: {proxy_type}")
+                self.logger.info(f"   代理IP: {current_ip}")
+                self.logger.info(f"   位置: {actual_region}, {actual_country}")
             else:
-                self.logger.warning(f"任务 {task_id} 代理连接测试失败，但仍分配代理（可能是网络波动）")
+                self.logger.warning(f"⚠️ 任务 {task_id} 代理连接测试失败，但仍分配代理（可能是网络波动）")
+                # 设置默认值
+                proxy_config['current_ip'] = 'unknown'
+                proxy_config['actual_country'] = 'Unknown'
+                proxy_config['actual_region'] = 'Unknown'
             
             # 无论测试结果如何都分配代理
             self.task_proxy_cache[cache_key] = proxy_config
-            self.logger.info(f"任务 {task_id} 分配代理成功: {proxy_type} - {proxy_config['display_info']}")
             return proxy_config
                 
         except Exception as e:

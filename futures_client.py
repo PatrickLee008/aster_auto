@@ -25,7 +25,8 @@ class AsterFuturesClient:
     """
     
     def __init__(self, user_address: str, signer_address: str, private_key: str, 
-                 proxy_host: str = '127.0.0.1', proxy_port: int = 7890, use_proxy: bool = True):
+                 proxy_host: str = '127.0.0.1', proxy_port: int = 7890, use_proxy: bool = True,
+                 proxy_auth: str = None):
         """
         初始化期货交易客户端
         
@@ -36,6 +37,7 @@ class AsterFuturesClient:
             proxy_host (str): 代理服务器地址
             proxy_port (int): 代理服务器端口
             use_proxy (bool): 是否使用代理
+            proxy_auth (str): 代理认证信息 (格式: username:password)，用于 HTTP 代理
         """
         # 确保地址格式正确（checksum格式）
         # 在多线程环境中避免事件循环问题
@@ -63,9 +65,18 @@ class AsterFuturesClient:
         
         # 设置代理
         if use_proxy:
+            # 如果提供了认证信息，使用 HTTP 代理（Smartproxy）
+            if proxy_auth:
+                proxy_url = f'http://{proxy_auth}@{proxy_host}:{proxy_port}'
+                print(f"使用 HTTP 认证代理: {proxy_host}:{proxy_port}")
+            else:
+                # 否则使用 SOCKS5 代理（本地开发）
+                proxy_url = f'socks5://{proxy_host}:{proxy_port}'
+                print(f"使用 SOCKS5 代理: {proxy_host}:{proxy_port}")
+            
             self.proxies = {
-                'http': f'socks5://{proxy_host}:{proxy_port}',
-                'https': f'socks5://{proxy_host}:{proxy_port}'
+                'http': proxy_url,
+                'https': proxy_url
             }
         else:
             self.proxies = None

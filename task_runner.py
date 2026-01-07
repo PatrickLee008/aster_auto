@@ -76,10 +76,39 @@ def run_task(task_id: int):
                 task.update_status('error', error_message="无法获取钱包凭据")
                 return
             
-            # 准备钱包配置
+            # 准备钱包配置（支持任务级代理）
+            # 优先使用 Smartproxy 任务级代理，如果未启用则回退到全局代理
+            from utils.smartproxy_manager import get_task_proxy_config
             from utils.proxy_config import is_proxy_enabled, get_proxy_info
-            proxy_enabled = is_proxy_enabled()
-            proxy_info = get_proxy_info() if proxy_enabled else {}
+            
+            # 尝试获取任务级代理配置
+            task_proxy = get_task_proxy_config(task_id, 'residential')
+            
+            if task_proxy and task_proxy.get('proxy_enabled'):
+                # 使用任务级代理（Smartproxy）
+                proxy_enabled = True
+                proxy_host = task_proxy.get('proxy_host')
+                proxy_port = task_proxy.get('proxy_port')
+                proxy_auth = task_proxy.get('proxy_auth')  # username:password 格式
+                current_ip = task_proxy.get('current_ip', 'unknown')
+                proxy_type = task_proxy.get('proxy_type', 'residential')
+                
+                logger.info(f"🌐 使用任务级代理")
+                logger.info(f"   代理类型: {proxy_type}")
+                logger.info(f"   代理服务器: {proxy_host}:{proxy_port}")
+                logger.info(f"   代理IP: {current_ip}")
+                logger.info(f"   国家: {task_proxy.get('country', 'US')}")
+            else:
+                # 回退到全局代理配置（开发环境）
+                proxy_enabled = is_proxy_enabled()
+                proxy_info = get_proxy_info() if proxy_enabled else {}
+                proxy_host = proxy_info.get('host', '127.0.0.1')
+                proxy_port = proxy_info.get('port', 7890)
+                proxy_auth = None
+                current_ip = 'N/A'
+                
+                if proxy_enabled:
+                    logger.info(f"🌐 使用全局代理: {proxy_host}:{proxy_port} (开发环境)")
             
             wallet_config = {
                 'user_address': wallet.user_address,
@@ -88,8 +117,13 @@ def run_task(task_id: int):
                 'api_key': credentials.get('api_key'),
                 'secret_key': credentials.get('secret_key'),
                 'proxy_enabled': proxy_enabled,
-                'proxy_host': proxy_info.get('host', '127.0.0.1'),
-                'proxy_port': proxy_info.get('port', 7890)
+                'proxy_host': proxy_host,
+                'proxy_port': proxy_port,
+                'proxy_auth': proxy_auth,  # 仅任务级代理有此字段
+                'current_ip': current_ip,  # 代理IP地址
+                'proxy_type': task_proxy.get('proxy_type') if task_proxy else None,
+                'country': task_proxy.get('country') if task_proxy else None,
+                'task_id': task_id  # 传递任务ID用于日志
             }
             
             # 根据策略类型实例化策略
@@ -170,6 +204,13 @@ def run_task(task_id: int):
                 logger.error("任务执行失败")
                 task.update_status('error', error_message="策略执行失败")
             
+            # 释放任务代理资源
+            if task_proxy and task_proxy.get('proxy_enabled'):
+                from utils.smartproxy_manager import get_proxy_manager
+                proxy_manager = get_proxy_manager()
+                proxy_manager.release_proxy_for_task(task_id)
+                logger.info(f"🌐 任务级代理资源已释放")
+            
             # 关闭日志处理器
             for handler in logger.handlers[:]:
                 handler.close()
@@ -179,6 +220,15 @@ def run_task(task_id: int):
             print(f"任务执行异常: {e}")
             import traceback
             traceback.print_exc()
+            
+            # 释放任务代理资源（异常情况）
+            try:
+                from utils.smartproxy_manager import get_proxy_manager
+                proxy_manager = get_proxy_manager()
+                proxy_manager.release_proxy_for_task(task_id)
+                print(f"🌐 任务级代理资源已释放（异常情况）")
+            except:
+                pass
             
             try:
                 task = db.session.get(Task, task_id)

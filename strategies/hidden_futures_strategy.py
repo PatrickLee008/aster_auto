@@ -85,13 +85,22 @@ class HiddenFuturesStrategy:
                 return False
                 
             config = self.wallet_config
+            
+            # 记录代理信息
+            if config.get('proxy_enabled'):
+                if config.get('current_ip') and config.get('current_ip') != 'N/A':
+                    self.log(f"🌐 使用代理IP: {config.get('current_ip')}")
+                else:
+                    self.log(f"🌐 使用代理: {config.get('proxy_host')}:{config.get('proxy_port')}")
+            
             self.client = AsterFuturesClient(
                 user_address=config['user_address'],
                 signer_address=config['signer_address'],
                 private_key=config['private_key'],
                 proxy_host=config.get('proxy_host', '127.0.0.1'),
                 proxy_port=config.get('proxy_port', 7890),
-                use_proxy=config.get('proxy_enabled', True)
+                use_proxy=config.get('proxy_enabled', True),
+                proxy_auth=config.get('proxy_auth')  # 传递代理认证信息
             )
             
             if not self.client.test_connection():

@@ -325,6 +325,13 @@ class VolumeStrategy:
                 secret_key = config.get('secret_key')
                 
                 if api_key and secret_key:
+                    # 记录代理信息
+                    if config.get('proxy_enabled'):
+                        if config.get('current_ip') and config.get('current_ip') != 'N/A':
+                            self.log(f"🌐 使用代理IP: {config.get('current_ip')}")
+                        else:
+                            self.log(f"🌐 使用代理: {config.get('proxy_host')}:{config.get('proxy_port')}")
+                    
                     # 传递代理配置给交易客户端
                     self.client = SimpleTradingClient(
                         api_key=api_key,
@@ -1918,10 +1925,34 @@ class VolumeStrategy:
                 # 双向成交 - 优化策略的目标结果
                 self.log("🎯 优化策略成功！双向订单都已成交")
                 
-                # 优化统计数据更新 - 延迟批量处理减少API调用
-                # 将订单ID标记为已成交，在策略结束时批量更新统计
-                self.completed_order_ids.extend([buy_order_id, sell_order_id])
-                self.log("📊 订单统计将在轮次结束时批量更新")
+                # 立即更新统计数据，不延迟
+                try:
+                    # 获取订单详情并立即更新统计
+                    buy_order_details = self.get_order_details(buy_order_id)
+                    sell_order_details = self.get_order_details(sell_order_id)
+                    
+                    if buy_order_details and sell_order_details:
+                        # 更新买单统计
+                        if buy_order_id not in self.processed_orders:
+                            buy_executed_qty = float(buy_order_details.get('executedQty', 0))
+                            buy_avg_price = float(buy_order_details.get('avgPrice', 0))
+                            buy_is_maker = buy_order_details.get('isMaker', True)
+                            buy_fee = self._calculate_fee_from_order_result(buy_order_details, is_maker=buy_is_maker)
+                            self._update_trade_statistics('BUY', buy_executed_qty, buy_avg_price, buy_fee)
+                            self.processed_orders.add(buy_order_id)
+                        
+                        # 更新卖单统计
+                        if sell_order_id not in self.processed_orders:
+                            sell_executed_qty = float(sell_order_details.get('executedQty', 0))
+                            sell_avg_price = float(sell_order_details.get('avgPrice', 0))
+                            sell_is_maker = sell_order_details.get('isMaker', True)
+                            sell_fee = self._calculate_fee_from_order_result(sell_order_details, is_maker=sell_is_maker)
+                            self._update_trade_statistics('SELL', sell_executed_qty, sell_avg_price, sell_fee)
+                            self.processed_orders.add(sell_order_id)
+                        
+                        self.log("📊 订单统计已实时更新")
+                except Exception as e:
+                    self.log(f"⚠️ 实时更新统计失败: {e}", "warning")
                 
                 # 从跟踪列表移除
                 if buy_order_id in self.pending_orders:
@@ -1949,23 +1980,33 @@ class VolumeStrategy:
                 buy_order_details = self.get_order_details(buy_order_id)
                 buy_executed_qty = Decimal(str(buy_order_details.get('executedQty', 0))) if buy_order_details else Decimal('0')
                 
-                if sell_partial:
-                    self.log(f"⚠️ 卖单部分成交: 已成交 {sell_executed_qty}/{actual_quantity}")
-                    # 部分成交也加入统计
-                    self.completed_order_ids.append(sell_order_id)
-                else:
-                    # 完全成交
-                    self.log(f"✅ 卖单完全成交: {sell_executed_qty}")
-                    self.completed_order_ids.append(sell_order_id)
+                # 立即更新统计
+                if sell_order_details and sell_executed_qty > 0:
+                    if sell_order_id not in self.processed_orders:
+                        sell_avg_price = float(sell_order_details.get('avgPrice', 0))
+                        sell_is_maker = sell_order_details.get('isMaker', True)
+                        sell_fee = self._calculate_fee_from_order_result(sell_order_details, is_maker=sell_is_maker)
+                        self._update_trade_statistics('SELL', float(sell_executed_qty), sell_avg_price, sell_fee)
+                        self.processed_orders.add(sell_order_id)
+                        
+                        if sell_partial:
+                            self.log(f"⚠️ 卖单部分成交: 已成交 {sell_executed_qty}/{actual_quantity}, 统计已更新")
+                        else:
+                            self.log(f"✅ 卖单完全成交: {sell_executed_qty}, 统计已更新")
                 
-                # 检查买单成交情况
-                if buy_partial:
-                    self.log(f"⚠️ 买单部分成交: 已成交 {buy_executed_qty}/{actual_quantity}")
-                    # 部分成交也加入统计
-                    self.completed_order_ids.append(buy_order_id)
-                elif buy_executed_qty > 0:
-                    self.log(f"✅ 买单已成交: {buy_executed_qty}")
-                    self.completed_order_ids.append(buy_order_id)
+                # 检查买单成交情况并更新统计
+                if buy_order_details and buy_executed_qty > 0:
+                    if buy_order_id not in self.processed_orders:
+                        buy_avg_price = float(buy_order_details.get('avgPrice', 0))
+                        buy_is_maker = buy_order_details.get('isMaker', True)
+                        buy_fee = self._calculate_fee_from_order_result(buy_order_details, is_maker=buy_is_maker)
+                        self._update_trade_statistics('BUY', float(buy_executed_qty), buy_avg_price, buy_fee)
+                        self.processed_orders.add(buy_order_id)
+                        
+                        if buy_partial:
+                            self.log(f"⚠️ 买单部分成交: 已成交 {buy_executed_qty}/{actual_quantity}, 统计已更新")
+                        elif buy_executed_qty > 0:
+                            self.log(f"✅ 买单已成交: {buy_executed_qty}, 统计已更新")
                 
                 # 检查是否为最后一轮
                 if round_num == self.rounds:
@@ -2027,23 +2068,33 @@ class VolumeStrategy:
                 sell_order_details = self.get_order_details(sell_order_id)
                 sell_executed_qty = Decimal(str(sell_order_details.get('executedQty', 0))) if sell_order_details else Decimal('0')
                 
-                if buy_partial:
-                    self.log(f"⚠️ 买单部分成交: 已成交 {buy_executed_qty}/{actual_quantity}")
-                    # 部分成交也加入统计
-                    self.completed_order_ids.append(buy_order_id)
-                else:
-                    # 完全成交
-                    self.log(f"✅ 买单完全成交: {buy_executed_qty}")
-                    self.completed_order_ids.append(buy_order_id)
+                # 立即更新统计
+                if buy_order_details and buy_executed_qty > 0:
+                    if buy_order_id not in self.processed_orders:
+                        buy_avg_price = float(buy_order_details.get('avgPrice', 0))
+                        buy_is_maker = buy_order_details.get('isMaker', True)
+                        buy_fee = self._calculate_fee_from_order_result(buy_order_details, is_maker=buy_is_maker)
+                        self._update_trade_statistics('BUY', float(buy_executed_qty), buy_avg_price, buy_fee)
+                        self.processed_orders.add(buy_order_id)
+                        
+                        if buy_partial:
+                            self.log(f"⚠️ 买单部分成交: 已成交 {buy_executed_qty}/{actual_quantity}, 统计已更新")
+                        else:
+                            self.log(f"✅ 买单完全成交: {buy_executed_qty}, 统计已更新")
                 
-                # 检查卖单成交情况
-                if sell_partial:
-                    self.log(f"⚠️ 卖单部分成交: 已成交 {sell_executed_qty}/{actual_quantity}")
-                    # 部分成交也加入统计
-                    self.completed_order_ids.append(sell_order_id)
-                elif sell_executed_qty > 0:
-                    self.log(f"✅ 卖单已成交: {sell_executed_qty}")
-                    self.completed_order_ids.append(sell_order_id)
+                # 检查卖单成交情况并更新统计
+                if sell_order_details and sell_executed_qty > 0:
+                    if sell_order_id not in self.processed_orders:
+                        sell_avg_price = float(sell_order_details.get('avgPrice', 0))
+                        sell_is_maker = sell_order_details.get('isMaker', True)
+                        sell_fee = self._calculate_fee_from_order_result(sell_order_details, is_maker=sell_is_maker)
+                        self._update_trade_statistics('SELL', float(sell_executed_qty), sell_avg_price, sell_fee)
+                        self.processed_orders.add(sell_order_id)
+                        
+                        if sell_partial:
+                            self.log(f"⚠️ 卖单部分成交: 已成交 {sell_executed_qty}/{actual_quantity}, 统计已更新")
+                        elif sell_executed_qty > 0:
+                            self.log(f"✅ 卖单已成交: {sell_executed_qty}, 统计已更新")
                 
                 # 检查是否为最后一轮
                 if round_num == self.rounds:
@@ -2229,9 +2280,9 @@ class VolumeStrategy:
                 
                 # 策略本身已有等待时间，无需额外间隔
             
-            # API优化：批量更新延迟的统计数据
-            self.log(f"\n=== 批量更新交易统计 ===")
-            self._batch_update_statistics()
+            # 不再需要批量更新统计，所有统计都已实时更新
+            # self.log(f"\n=== 批量更新交易统计 ===")
+            # self._batch_update_statistics()
             
             # 执行最终余额校验和补单
             self.log(f"\n=== 执行最终余额校验 ===")
