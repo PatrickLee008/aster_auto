@@ -52,13 +52,32 @@ class AsterFuturesClient:
             pass
         
         from web3 import Web3
-        try:
-            self.user = Web3.to_checksum_address(user_address)
-            self.signer = Web3.to_checksum_address(signer_address)
-        except Exception as e:
-            print(f"⚠️  地址格式转换失败: {e}")
+        
+        # 检查地址长度，AsterDEX 可能使用非标准以太坊地址
+        # 标准以太坊地址是42字符（0x + 40），但某些链（如 StarkNet）使用更长的地址
+        if user_address and len(user_address) <= 42:
+            # 标准以太坊地址，使用 checksum 格式
+            try:
+                self.user = Web3.to_checksum_address(user_address)
+            except Exception as e:
+                print(f"⚠️  用户地址格式转换失败: {e}, 使用原始地址")
+                self.user = user_address
+        else:
+            # 超长地址（可能是其他链），直接使用
             self.user = user_address
+            print(f"ℹ️  检测到非标准长度地址（{len(user_address)}字符），可能为其他链地址")
+        
+        if signer_address and len(signer_address) <= 42:
+            # 标准以太坊地址，使用 checksum 格式
+            try:
+                self.signer = Web3.to_checksum_address(signer_address)
+            except Exception as e:
+                print(f"⚠️  签名地址格式转换失败: {e}, 使用原始地址")
+                self.signer = signer_address
+        else:
+            # 超长地址（可能是其他链），直接使用
             self.signer = signer_address
+            print(f"ℹ️  检测到非标准长度地址（{len(signer_address)}字符），可能为其他链地址")
             
         self.private_key = private_key
         self.host = 'https://fapi.asterdex.com'
@@ -171,9 +190,16 @@ class AsterFuturesClient:
         # 生成JSON字符串
         json_str = json.dumps(params, sort_keys=True).replace(' ', '').replace('\'', '\"')
         
-        # ABI编码
-        encoded = encode(['string', 'address', 'address', 'uint256'], 
-                        [json_str, self.user, self.signer, nonce])
+        # 处理地址编码
+        # 如果地址长度超过42，使用 bytes32 类型而不是 address 类型
+        if len(self.user) > 42 or len(self.signer) > 42:
+            # 使用字符串类型编码（适用于非标准地址）
+            encoded = encode(['string', 'string', 'string', 'uint256'], 
+                            [json_str, self.user, self.signer, nonce])
+        else:
+            # 标准以太坊地址，使用 address 类型
+            encoded = encode(['string', 'address', 'address', 'uint256'], 
+                            [json_str, self.user, self.signer, nonce])
         
         # 生成Keccak哈希
         keccak_hex = Web3.keccak(encoded).hex()

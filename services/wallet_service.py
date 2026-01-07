@@ -159,6 +159,12 @@ class WalletService:
             if 'is_active' in kwargs:
                 wallet.is_active = kwargs['is_active']
             
+            # 更新期货地址（如果提供）
+            if 'user_address' in kwargs:
+                wallet.user_address = kwargs['user_address']
+            if 'signer_address' in kwargs:
+                wallet.signer_address = kwargs['signer_address']
+            
             # 更新API凭证（如果提供）
             api_key = kwargs.get('api_key')
             secret_key = kwargs.get('secret_key')
@@ -364,6 +370,12 @@ class WalletService:
             from futures_client import AsterFuturesClient
             
             credentials = wallet.get_api_credentials()
+            
+            # 调试：打印地址信息
+            print(f"🔍 [调试] 从数据库读取的地址信息:")
+            print(f"   user_address: {wallet.user_address}")
+            print(f"   signer_address: {wallet.signer_address}")
+            print(f"   private_key 长度: {len(credentials['private_key']) if credentials['private_key'] else 'None'}")
             
             if not wallet.user_address or not wallet.signer_address or not credentials['private_key']:
                 return False, None
