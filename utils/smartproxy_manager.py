@@ -153,10 +153,12 @@ class SmartproxyManager:
             # 使用decodo官方推荐的测试URL
             test_url = 'https://ip.decodo.com/json'
             
+            self.logger.info(f"🔍 开始测试代理连接: {host}:{port}")
+            
             response = requests.get(
                 test_url,
                 proxies=proxies,
-                timeout=8,  # 稍微缩短超时时间
+                timeout=15,  # 增加超时时间到15秒
                 headers={'User-Agent': 'AsterAuto/1.0'}
             )
             
@@ -167,17 +169,27 @@ class SmartproxyManager:
                 region = ip_info.get('region', 'Unknown')
                 
                 proxy_config['current_ip'] = current_ip
-                proxy_config['actual_country'] = country  
+                proxy_config['actual_country'] = country
                 proxy_config['actual_region'] = region
                 
-                self.logger.info(f"代理测试成功 - IP: {current_ip}, 位置: {region}, {country}")
+                self.logger.info(f"✅ 代理测试成功 - IP: {current_ip}, 位置: {region}, {country}")
                 return True
             else:
-                self.logger.warning(f"代理测试HTTP错误: {response.status_code}")
+                self.logger.warning(f"❌ 代理测试HTTP错误: {response.status_code}")
+                self.logger.warning(f"响应内容: {response.text[:200]}")
                 return False
                 
+        except requests.exceptions.Timeout as e:
+            self.logger.warning(f"⏱️ 代理连接测试超时(15秒): {e}")
+            return False
+        except requests.exceptions.ProxyError as e:
+            self.logger.warning(f"🚫 代理连接错误: {e}")
+            return False
+        except requests.exceptions.ConnectionError as e:
+            self.logger.warning(f"🔌 网络连接错误: {e}")
+            return False
         except Exception as e:
-            self.logger.warning(f"代理连接测试失败: {e}")
+            self.logger.warning(f"❌ 代理连接测试失败: {type(e).__name__} - {e}")
             return False
     
     def get_proxy_dict_for_requests(self, proxy_config: Dict) -> Dict[str, str]:

@@ -61,8 +61,8 @@ def test_smartproxy_manager():
         print(f"  residential_port = {manager.residential_port}")
         
         # 测试获取代理配置
-        print(f"\n测试获取任务代理配置 (任务ID: 39):")
-        task_config = get_task_proxy_config(39, 'residential')
+        print(f"\n测试获取任务代理配置 (任务ID: 999):")
+        task_config = get_task_proxy_config(999, 'residential')
         print(f"  proxy_enabled = {task_config.get('proxy_enabled', False)}")
         
         if task_config.get('proxy_enabled'):
@@ -72,6 +72,16 @@ def test_smartproxy_manager():
             print(f"  proxy_auth = {task_config.get('proxy_auth', 'None')[:20]}..." if task_config.get('proxy_auth') else "  proxy_auth = None")
             print(f"  country = {task_config.get('country', 'None')}")
             print(f"  current_ip = {task_config.get('current_ip', 'None')}")
+            
+            # 如果IP是unknown，说明测试失败
+            if task_config.get('current_ip') == 'unknown':
+                print("\n⚠️ 警告: 代理IP显示为 'unknown'，说明代理测试失败")
+                print("可能原因:")
+                print("  1. 代理凭证不正确")
+                print("  2. 网络连接问题")
+                print("  3. Smartproxy服务问题")
+                print("  4. 代理测试URL被屏蔽")
+                print("\n请检查日志中的详细错误信息")
         else:
             print("  代理未启用")
             
