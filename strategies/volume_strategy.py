@@ -520,26 +520,26 @@ class VolumeStrategy:
         sell_value = sell_price * actual_quantity
         
         if buy_value < 5.0 or sell_value < 5.0:
-            self.log(f"❌ 订单价值不足5 USDT: 买单={buy_value:.2f}, 卖单={sell_value:.2f}")
+            self.log(f"❌ 订单价值不足5 {self.quote_asset}: 买单={buy_value:.2f}, 卖单={sell_value:.2f}")
             self.log(f"📊 价格: 买={buy_price:.5f}, 卖={sell_price:.5f}, 数量={actual_quantity:.2f}")
             return None, None
             
-        # 检查USDT余额是否足够支持买单
+        # 检查计价货币余额是否足够支持买单
         try:
-            usdt_balance = self.get_usdt_balance()
-            self.log(f"💰 当前USDT余额: {usdt_balance:.2f}U")
-            if usdt_balance < buy_value:
-                error_msg = f"USDT余额不足: 需要{buy_value:.2f}U，实际{usdt_balance:.2f}U，缺少{buy_value - usdt_balance:.2f}U"
+            quote_balance = self.get_quote_balance()
+            self.log(f"💰 当前{self.quote_asset}余额: {quote_balance:.2f}")
+            if quote_balance < buy_value:
+                error_msg = f"{self.quote_asset}余额不足: 需要{buy_value:.2f}，实际{quote_balance:.2f}，缺少{buy_value - quote_balance:.2f}"
                 self.log(f"❌ {error_msg}")
-                self.log(f"💡 建议：增加USDT余额或减少交易数量")
+                self.log(f"💡 建议：增加{self.quote_asset}余额或减少交易数量")
                 # 记录详细错误信息供任务状态显示
                 if hasattr(self, 'last_error'):
                     self.last_error = error_msg
                 return None, None
             else:
-                self.log(f"✅ USDT余额充足，可以支持买单")
+                self.log(f"✅ {self.quote_asset}余额充足，可以支持买单")
         except Exception as e:
-            self.log(f"⚠️ 无法检查USDT余额: {e}")
+            self.log(f"⚠️ 无法检查{self.quote_asset}余额: {e}")
             # 继续执行，让API返回具体错误
         
         # 同时提交买卖单（不同价格）
@@ -1653,16 +1653,16 @@ class VolumeStrategy:
             shortage = required_quantity - current_balance
             self.log(f"⚠️ 余额不足，缺少: {shortage:.2f}", "warning")
             
-            # 检查USDT余额
+            # 检查计价货币余额
             account_info = self.client.get_account_info()
-            usdt_balance = 0.0
+            quote_balance = 0.0
             if account_info and 'balances' in account_info:
                 for balance in account_info['balances']:
-                    if balance['asset'] == 'USDT':
-                        usdt_balance = float(balance['free'])
+                    if balance['asset'] == self.quote_asset:
+                        quote_balance = float(balance['free'])
                         break
             
-            self.log(f"可用USDT余额: {usdt_balance:.2f}")
+            self.log(f"可用{self.quote_asset}余额: {quote_balance:.2f}")
             
             # 获取买一价
             book_data = self.get_order_book()
@@ -1672,20 +1672,20 @@ class VolumeStrategy:
             
             buy_price = book_data['ask_price']  # 买一价
             
-            # 关键：按设定数量总价值+1USDT计算，确保容错性
-            required_usdt_value = required_quantity * buy_price  # 设定数量的总价值
-            target_usdt_value = required_usdt_value + 1.0  # 比设定总价值多1 USDT
-            buy_quantity = target_usdt_value / buy_price  # 实际买入数量
+            # 关键：按设定数量总价值+1计价货币计算，确保容错性
+            required_quote_value = required_quantity * buy_price  # 设定数量的总价值
+            target_quote_value = required_quote_value + 1.0  # 比设定总价值多1个计价货币
+            buy_quantity = target_quote_value / buy_price  # 实际买入数量
             
             self.log(f"=== 直接买入策略（容错性增强）===")
             self.log(f"设定交易数量: {required_quantity:.2f}")
-            self.log(f"设定数量价值: {required_usdt_value:.2f} USDT")
+            self.log(f"设定数量价值: {required_quote_value:.2f} {self.quote_asset}")
             self.log(f"买一价格: {buy_price:.6f}")
-            self.log(f"目标买入价值: {target_usdt_value:.2f} USDT (+1 USDT容错)")
+            self.log(f"目标买入价值: {target_quote_value:.2f} {self.quote_asset} (+1 {self.quote_asset}容错)")
             self.log(f"实际买入数量: {buy_quantity:.6f}")
             
-            if usdt_balance < target_usdt_value:
-                self.log(f"❌ USDT余额不足: {usdt_balance:.2f} < {target_usdt_value:.2f}", "error")
+            if quote_balance < target_quote_value:
+                self.log(f"❌ {self.quote_asset}余额不足: {quote_balance:.2f} < {target_quote_value:.2f}", "error")
                 return False
             
             # 直接市价买入
@@ -1731,11 +1731,11 @@ class VolumeStrategy:
             estimated_value = current_balance * sell_price
             
             self.log(f"卖一价格: {sell_price:.6f}")
-            self.log(f"估算卖出价值: {estimated_value:.2f} USDT")
+            self.log(f"估算卖出价值: {estimated_value:.2f} {self.quote_asset}")
             
             # 检查订单价值
             if estimated_value < 5.0:
-                self.log(f"⚠️ 卖出价值不足5 USDT，保留余额", "warning")
+                self.log(f"⚠️ 卖出价值不足5 {self.quote_asset}，保留余额", "warning")
                 return True
             
             # 直接市价卖出全部余额
