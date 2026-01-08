@@ -45,6 +45,7 @@
                                 {% endif %}
                                 <th>钱包</th>
                                 <th>策略</th>
+                                <th>交易对</th>
                                 <th>状态</th>
                                 <th>执行统计</th>
                                 <th>创建时间</th>
@@ -92,6 +93,15 @@
                                         <br>
                                         <small class="text-muted">{{ task.strategy.strategy_type }}</small>
                                     </div>
+                                </td>
+                                <td>
+                                    <span class="badge bg-info text-dark">
+                                        <i class="fas fa-exchange-alt"></i> {{ task.symbol }}
+                                    </span>
+                                    <br>
+                                    <small class="{{ 'text-success' if task.status == 'running' else 'text-muted' }}">
+                                        {{ '正在执行' if task.status == 'running' else '未运行' }}
+                                    </small>
                                 </td>
                                 <td>
                                     <span class="badge bg-{{ 
