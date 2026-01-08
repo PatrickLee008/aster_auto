@@ -235,8 +235,8 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="taskName" class="form-label">任务名称 *</label>
-                                <input type="text" class="form-control" id="taskName" name="name" required maxlength="100">
-                                <div class="form-text">任务名称必须唯一，用于生成日志文件（最多100字符）</div>
+                                <input type="text" class="form-control" id="taskName" name="name" required maxlength="100" readonly>
+                                <div class="form-text">自动生成：交易对_数量_次数_MMDD</div>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -344,8 +344,8 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="editTaskName" class="form-label">任务名称 *</label>
-                                <input type="text" class="form-control" id="editTaskName" name="name" required maxlength="100">
-                                <div class="form-text">任务名称必须唯一，用于生成日志文件（最多100字符）</div>
+                                <input type="text" class="form-control" id="editTaskName" name="name" required maxlength="100" readonly>
+                                <div class="form-text">任务名称不可编辑</div>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -470,6 +470,31 @@
 let currentTaskId = null;
 
 $(document).ready(function() {
+    function generateTaskName() {
+        const symbol = ($('#taskSymbol').val() || '').toUpperCase().trim();
+        const qty = ($('#taskQuantity').val() || '').trim();
+        const rounds = ($('#taskRounds').val() || '').trim();
+        if (!symbol || !qty || !rounds) {
+            return '';
+        }
+        const now = new Date();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        return `${symbol}_${qty}_${rounds}_${mm}${dd}`;
+    }
+
+    function updateTaskName() {
+        const name = generateTaskName();
+        if (name) {
+            $('#taskName').val(name);
+        } else {
+            $('#taskName').val('');
+        }
+    }
+
+    $('#taskSymbol, #taskQuantity, #taskRounds').on('input change', updateTaskName);
+    updateTaskName();
+
     // 钱包选择变化时过滤策略
     $('#taskWallet, #editTaskWallet').on('change', function() {
         const walletType = $(this).find('option:selected').data('type');
@@ -541,6 +566,11 @@ $(document).ready(function() {
     // 提交任务表单
     $('#createTaskForm').on('submit', function(e) {
         e.preventDefault();
+        updateTaskName();
+        if (!$('#taskName').val()) {
+            alert('请先输入交易对、数量和次数，以生成任务名称');
+            return;
+        }
         
         // 根据钱包类型确定杠杆值
         const selectedWallet = $('#taskWallet option:selected');
