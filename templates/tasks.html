@@ -236,7 +236,7 @@
                             <div class="mb-3">
                                 <label for="taskName" class="form-label">任务名称 *</label>
                                 <input type="text" class="form-control" id="taskName" name="name" required maxlength="100" readonly>
-                                <div class="form-text">自动生成：交易对_数量_次数_MMDD</div>
+                                <div class="form-text">自动生成：交易对_数量_次数次</div>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -471,16 +471,21 @@ let currentTaskId = null;
 
 $(document).ready(function() {
     function generateTaskName() {
-        const symbol = ($('#taskSymbol').val() || '').toUpperCase().trim();
+        const rawSymbol = ($('#taskSymbol').val() || '').toUpperCase().trim();
         const qty = ($('#taskQuantity').val() || '').trim();
         const rounds = ($('#taskRounds').val() || '').trim();
-        if (!symbol || !qty || !rounds) {
+        if (!rawSymbol || !qty || !rounds) {
             return '';
         }
-        const now = new Date();
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const dd = String(now.getDate()).padStart(2, '0');
-        return `${symbol}_${qty}_${rounds}_${mm}${dd}`;
+        const quoteSuffixes = ['USD1', 'USDT', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI', 'TRY', 'EUR', 'BRL', 'BTC', 'ETH', 'BNB', 'USD'];
+        let baseSymbol = rawSymbol;
+        for (const suffix of quoteSuffixes) {
+            if (rawSymbol.endsWith(suffix)) {
+                baseSymbol = rawSymbol.slice(0, -suffix.length) || rawSymbol;
+                break;
+            }
+        }
+        return `${baseSymbol}_${qty}_${rounds}次`;
     }
 
     function updateTaskName() {
