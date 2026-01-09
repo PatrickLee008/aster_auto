@@ -554,12 +554,18 @@ $(document).ready(function() {
         }
     });
     
-    $('#taskQuantity').on('input', function() {
-        quantityToUsdt($(this).val(), 'create');
+    $('#taskQuantity').on('blur', function() {
+        const quantity = $(this).val();
+        if (quantity && !isNaN(quantity) && parseFloat(quantity) > 0) {
+            quantityToUsdt(quantity, 'create');
+        }
     });
     
-    $('#taskUsdtValue').on('input', function() {
-        usdtToQuantity($(this).val(), 'create');
+    $('#taskUsdtValue').on('blur', function() {
+        const usdtValue = $(this).val();
+        if (usdtValue && !isNaN(usdtValue) && parseFloat(usdtValue) > 0) {
+            usdtToQuantity(usdtValue, 'create');
+        }
     });
     
     $('#editTaskSymbol').on('blur', function() {
@@ -569,12 +575,18 @@ $(document).ready(function() {
         }
     });
     
-    $('#editTaskQuantity').on('input', function() {
-        quantityToUsdt($(this).val(), 'edit');
+    $('#editTaskQuantity').on('blur', function() {
+        const quantity = $(this).val();
+        if (quantity && !isNaN(quantity) && parseFloat(quantity) > 0) {
+            quantityToUsdt(quantity, 'edit');
+        }
     });
     
-    $('#editTaskUsdtValue').on('input', function() {
-        usdtToQuantity($(this).val(), 'edit');
+    $('#editTaskUsdtValue').on('blur', function() {
+        const usdtValue = $(this).val();
+        if (usdtValue && !isNaN(usdtValue) && parseFloat(usdtValue) > 0) {
+            usdtToQuantity(usdtValue, 'edit');
+        }
     });
 
     $('#taskSymbol, #taskQuantity, #taskRounds').on('input change', updateTaskName);
@@ -1118,29 +1130,63 @@ function getBaseSymbol(symbol) {
 function quantityToUsdt(quantity, context = 'create') {
     if (!currentPrice || !quantity || isCalculating) return;
     
-    isCalculating = true;
-    const usdtValue = (parseFloat(quantity) * currentPrice).toFixed(2);
     const usdtInputId = context === 'create' ? '#taskUsdtValue' : '#editTaskUsdtValue';
-    $(usdtInputId).val(usdtValue);
-    isCalculating = false;
+    const priceInfoId = context === 'create' ? '#priceInfo' : '#editPriceInfo';
+    
+    isCalculating = true;
+    
+    // 显示计算中提示
+    const originalPriceInfo = $(priceInfoId).html();
+    $(priceInfoId).text('计算中...');
+    
+    // 模拟计算延迟，提供更好的用户反馈
+    setTimeout(() => {
+        try {
+            const usdtValue = (parseFloat(quantity) * currentPrice).toFixed(2);
+            $(usdtInputId).val(usdtValue);
+        } catch (e) {
+            console.error('计算USDT价值失败:', e);
+        }
+        
+        // 恢复原来的价格信息
+        $(priceInfoId).html(originalPriceInfo);
+        isCalculating = false;
+    }, 200);
 }
 
 // USDT价值转数量
 function usdtToQuantity(usdtValue, context = 'create') {
     if (!currentPrice || !usdtValue || isCalculating) return;
     
-    isCalculating = true;
-    const quantity = (parseFloat(usdtValue) / currentPrice).toFixed(8);
     const quantityInputId = context === 'create' ? '#taskQuantity' : '#editTaskQuantity';
-    $(quantityInputId).val(quantity);
-    isCalculating = false;
+    const priceInfoId = context === 'create' ? '#priceInfo' : '#editPriceInfo';
     
-    // 更新任务名称
-    if (context === 'create') {
-        updateTaskName();
-    } else {
-        updateEditTaskName();
-    }
+    isCalculating = true;
+    
+    // 显示计算中提示
+    const originalPriceInfo = $(priceInfoId).html();
+    $(priceInfoId).text('计算中...');
+    
+    // 模拟计算延迟，提供更好的用户反馈
+    setTimeout(() => {
+        try {
+            const quantity = (parseFloat(usdtValue) / currentPrice).toFixed(8);
+            $(quantityInputId).val(quantity);
+            
+            // 更新任务名称
+            if (context === 'create') {
+                updateTaskName();
+            } else {
+                updateEditTaskName();
+            }
+        } catch (e) {
+            console.error('计算数量失败:', e);
+        }
+        
+        // 恢复原来的价格信息
+        $(priceInfoId).html(originalPriceInfo);
+        isCalculating = false;
+    }, 200);
 }
 
 // 填充编辑表单
@@ -1175,12 +1221,12 @@ function populateEditForm(task) {
     const symbol = params.symbol || task.symbol || '';
     if (symbol) {
         fetchSymbolPrice(symbol, 'edit');
-        // 计算当前的USDT价值
+        // 延迟计算当前的USDT价值，确保价格获取完成
         setTimeout(() => {
-            if (currentPrice) {
+            if (currentPrice && $('#editTaskQuantity').val()) {
                 quantityToUsdt($('#editTaskQuantity').val(), 'edit');
             }
-        }, 1000);
+        }, 1500); // 增加延迟时间，确保价格获取完成
     }
 }
 
