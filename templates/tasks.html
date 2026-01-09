@@ -488,6 +488,24 @@ $(document).ready(function() {
         return `${baseSymbol}_${qty}_${rounds}次`;
     }
 
+    function generateEditTaskName() {
+        const rawSymbol = ($('#editTaskSymbol').val() || '').toUpperCase().trim();
+        const qty = ($('#editTaskQuantity').val() || '').trim();
+        const rounds = ($('#editTaskRounds').val() || '').trim();
+        if (!rawSymbol || !qty || !rounds) {
+            return '';
+        }
+        const quoteSuffixes = ['USD1', 'USDT', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI', 'TRY', 'EUR', 'BRL', 'BTC', 'ETH', 'BNB', 'USD'];
+        let baseSymbol = rawSymbol;
+        for (const suffix of quoteSuffixes) {
+            if (rawSymbol.endsWith(suffix)) {
+                baseSymbol = rawSymbol.slice(0, -suffix.length) || rawSymbol;
+                break;
+            }
+        }
+        return `${baseSymbol}_${qty}_${rounds}次`;
+    }
+
     function updateTaskName() {
         const name = generateTaskName();
         if (name) {
@@ -497,7 +515,17 @@ $(document).ready(function() {
         }
     }
 
+    function updateEditTaskName() {
+        const name = generateEditTaskName();
+        if (name) {
+            $('#editTaskName').val(name);
+        } else {
+            $('#editTaskName').val('');
+        }
+    }
+
     $('#taskSymbol, #taskQuantity, #taskRounds').on('input change', updateTaskName);
+    $('#editTaskSymbol, #editTaskQuantity, #editTaskRounds').on('input change', updateEditTaskName);
     updateTaskName();
 
     // 钱包选择变化时过滤策略
@@ -621,6 +649,13 @@ $(document).ready(function() {
     // 提交编辑任务表单
     $('#editTaskForm').on('submit', function(e) {
         e.preventDefault();
+        
+        // 更新任务名称
+        updateEditTaskName();
+        if (!$('#editTaskName').val()) {
+            alert('请先输入交易对、数量和次数，以生成任务名称');
+            return;
+        }
         
         // 根据钱包类型确定杠杆值
         const selectedEditWallet = $('#editTaskWallet option:selected');
@@ -889,6 +924,9 @@ function populateEditForm(task) {
     }
     // 现货钱包的杠杆值会自动设为1，无需手动设置
     // 交易方向由策略内部决定，不需要用户编辑
+    
+    // 更新任务名称
+    updateEditTaskName();
 }
 
 // 删除任务
