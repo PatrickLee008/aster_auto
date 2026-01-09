@@ -547,9 +547,10 @@ $(document).ready(function() {
 
     
     // 事件监听器
-    $('#taskSymbol').on('blur', function() {
+    $('#taskSymbol').on('blur input change', function() {
         const symbol = $(this).val().toUpperCase().trim();
-        if (symbol) {
+        if (symbol && symbol.length >= 4) {  // 最少4个字符就尝试获取价格
+            console.log('创建任务 - 交易对变化:', symbol);
             fetchSymbolPrice(symbol, 'create');
         }
     });
@@ -568,9 +569,10 @@ $(document).ready(function() {
         }
     });
     
-    $('#editTaskSymbol').on('blur', function() {
+    $('#editTaskSymbol').on('blur input change', function() {
         const symbol = $(this).val().toUpperCase().trim();
-        if (symbol) {
+        if (symbol && symbol.length >= 4) {  // 最少4个字符就尝试获取价格
+            console.log('编辑任务 - 交易对变化:', symbol);
             fetchSymbolPrice(symbol, 'edit');
         }
     });
@@ -1099,6 +1101,9 @@ let isCalculating = false;
 function fetchSymbolPrice(symbol, context = 'create') {
     if (!symbol) return;
     
+    symbol = symbol.toUpperCase().trim(); // 确保统一格式
+    console.log(`fetchSymbolPrice被调用: symbol=${symbol}, context=${context}`);
+    
     const priceInfoId = context === 'create' ? '#priceInfo' : '#editPriceInfo';
     const quantityUnitId = context === 'create' ? '#quantityUnit' : '#editQuantityUnit';
     const strategySelectId = context === 'create' ? '#taskStrategy' : '#editTaskStrategy';
@@ -1137,9 +1142,12 @@ function fetchSymbolPrice(symbol, context = 'create') {
         `/api/tasks/price/${symbol}?strategy_id=${strategyId}` : 
         `/api/tasks/price/${symbol}`;
     
+    console.log(`发送价格请求: ${url}`);
+    
     $.ajax({
         url: url,
         method: 'GET',
+        cache: false, // 禁用缓存，确保每次都是新请求
         success: function(response) {
             if (response.success) {
                 currentPrice = response.price;
