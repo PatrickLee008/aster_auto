@@ -136,8 +136,7 @@ class TaskService:
             ).first()
             
             if running_same_symbol_task:
-                # 获取运行中任务的用户名
-                from models import User
+                # 获取运行中任务的用户名（User已经在文件开头导入）
                 task_user = User.query.get(running_same_symbol_task.user_id)
                 username = task_user.username if task_user else "未知用户"
                 return False, f"交易对 {task.symbol} 正在被用户 '{username}' 的任务 '{running_same_symbol_task.name}' 使用，请先停止该任务"
