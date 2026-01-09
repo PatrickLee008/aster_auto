@@ -1194,7 +1194,8 @@ function usdtToQuantity(usdtValue, context = 'create') {
     // 模拟计算延迟，提供更好的用户反馈
     setTimeout(() => {
         try {
-            const quantity = (parseFloat(usdtValue) / currentPrice).toFixed(8);
+            // 计算数量并取整数
+            const quantity = Math.floor(parseFloat(usdtValue) / currentPrice);
             $(quantityInputId).val(quantity);
             
             // 更新任务名称
