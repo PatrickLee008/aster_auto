@@ -401,3 +401,53 @@ def cleanup_orphan_tasks():
             'success': False,
             'message': f"清理孤儿任务异常: {str(e)}"
         }), 500
+
+
+@task_bp.route('/price/<symbol>', methods=['GET'])
+@login_required
+def get_symbol_price(symbol):
+    """获取交易对价格API"""
+    try:
+        from utils.spot_client import SpotClient
+        from utils.futures_client import FuturesClient
+        
+        symbol = symbol.upper().strip()
+        
+        # 先尝试现货API获取价格
+        try:
+            spot_client = SpotClient()
+            price_data = spot_client.get_price(symbol)
+            if price_data and 'price' in price_data:
+                return jsonify({
+                    'success': True,
+                    'symbol': symbol,
+                    'price': float(price_data['price']),
+                    'source': 'spot'
+                })
+        except Exception as e:
+            print(f"现货API获取价格失败: {e}")
+        
+        # 如果现货失败，尝试合约API
+        try:
+            futures_client = FuturesClient()
+            price_data = futures_client.get_price(symbol)
+            if price_data and 'price' in price_data:
+                return jsonify({
+                    'success': True,
+                    'symbol': symbol,
+                    'price': float(price_data['price']),
+                    'source': 'futures'
+                })
+        except Exception as e:
+            print(f"合约API获取价格失败: {e}")
+        
+        return jsonify({
+            'success': False,
+            'message': f"无法获取 {symbol} 的价格信息"
+        }), 404
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f"获取价格异常: {str(e)}"
+        }), 500

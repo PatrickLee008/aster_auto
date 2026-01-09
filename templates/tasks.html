@@ -291,9 +291,25 @@
                                     <label for="taskQuantity" class="form-label">
                                         每次交易数量 <span class="text-danger">*</span>
                                     </label>
-                                    <input type="number" class="form-control" id="taskQuantity" name="quantity" 
-                                           min="0.001" step="0.001" placeholder="0.001" required>
+                                    <div class="input-group">
+                                        <input type="number" class="form-control" id="taskQuantity" name="quantity" 
+                                               min="0.001" step="0.001" placeholder="0.001" required>
+                                        <span class="input-group-text" id="quantityUnit">-</span>
+                                    </div>
                                     <div class="form-text">每次交易的数量，请根据交易对精度设置</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="taskUsdtValue" class="form-label">
+                                        等价USDT价值
+                                    </label>
+                                    <div class="input-group">
+                                        <input type="number" class="form-control" id="taskUsdtValue" 
+                                               min="0.01" step="0.01" placeholder="100.00">
+                                        <span class="input-group-text">USDT</span>
+                                    </div>
+                                    <div class="form-text">
+                                        <span id="priceInfo">请先选择交易对获取价格</span>
+                                    </div>
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="taskRounds" class="form-label">
@@ -400,9 +416,25 @@
                                     <label for="editTaskQuantity" class="form-label">
                                         每次交易数量 <span class="text-danger">*</span>
                                     </label>
-                                    <input type="number" class="form-control" id="editTaskQuantity" name="quantity" 
-                                           min="0.001" step="0.001" placeholder="0.001" required>
+                                    <div class="input-group">
+                                        <input type="number" class="form-control" id="editTaskQuantity" name="quantity" 
+                                               min="0.001" step="0.001" placeholder="0.001" required>
+                                        <span class="input-group-text" id="editQuantityUnit">-</span>
+                                    </div>
                                     <div class="form-text">每次交易的数量，请根据交易对精度设置</div>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="editTaskUsdtValue" class="form-label">
+                                        等价USDT价值
+                                    </label>
+                                    <div class="input-group">
+                                        <input type="number" class="form-control" id="editTaskUsdtValue" 
+                                               min="0.01" step="0.01" placeholder="100.00">
+                                        <span class="input-group-text">USDT</span>
+                                    </div>
+                                    <div class="form-text">
+                                        <span id="editPriceInfo">请先选择交易对获取价格</span>
+                                    </div>
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="editTaskRounds" class="form-label">
@@ -484,6 +516,10 @@
 let currentTaskId = null;
 
 $(document).ready(function() {
+    // 全局变量
+    let currentPrice = null;
+    let isCalculating = false;
+    
     function generateTaskName() {
         const rawSymbol = ($('#taskSymbol').val() || '').toUpperCase().trim();
         const qty = ($('#taskQuantity').val() || '').trim();
@@ -512,6 +548,112 @@ $(document).ready(function() {
         }
     }
 
+
+    // 获取交易对价格
+    function fetchSymbolPrice(symbol, context = 'create') {
+        if (!symbol || symbol.length < 6) return;
+        
+        const priceInfoId = context === 'create' ? '#priceInfo' : '#editPriceInfo';
+        const quantityUnitId = context === 'create' ? '#quantityUnit' : '#editQuantityUnit';
+        
+        $(priceInfoId).text('获取价格中...');
+        $(quantityUnitId).text('-');
+        
+        $.ajax({
+            url: `/api/tasks/price/${symbol}`,
+            method: 'GET',
+            success: function(response) {
+                if (response.success) {
+                    currentPrice = response.price;
+                    $(priceInfoId).html(`价格: <strong>${response.price}</strong> USDT`);
+                    
+                    // 更新数量单位显示
+                    const baseSymbol = getBaseSymbol(symbol);
+                    $(quantityUnitId).text(baseSymbol);
+                } else {
+                    $(priceInfoId).text('获取价格失败: ' + response.message);
+                    currentPrice = null;
+                    $(quantityUnitId).text('-');
+                }
+            },
+            error: function() {
+                $(priceInfoId).text('网络错误，无法获取价格');
+                currentPrice = null;
+                $(quantityUnitId).text('-');
+            }
+        });
+    }
+    
+    // 获取基础币种符号
+    function getBaseSymbol(symbol) {
+        const quoteSuffixes = ['USDT', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI', 'USD'];
+        for (const suffix of quoteSuffixes) {
+            if (symbol.endsWith(suffix)) {
+                return symbol.slice(0, -suffix.length) || symbol;
+            }
+        }
+        return symbol;
+    }
+    
+    // 数量转USDT价值
+    function quantityToUsdt(quantity, context = 'create') {
+        if (!currentPrice || !quantity || isCalculating) return;
+        
+        isCalculating = true;
+        const usdtValue = (parseFloat(quantity) * currentPrice).toFixed(2);
+        const usdtInputId = context === 'create' ? '#taskUsdtValue' : '#editTaskUsdtValue';
+        $(usdtInputId).val(usdtValue);
+        isCalculating = false;
+    }
+    
+    // USDT价值转数量
+    function usdtToQuantity(usdtValue, context = 'create') {
+        if (!currentPrice || !usdtValue || isCalculating) return;
+        
+        isCalculating = true;
+        const quantity = (parseFloat(usdtValue) / currentPrice).toFixed(8);
+        const quantityInputId = context === 'create' ? '#taskQuantity' : '#editTaskQuantity';
+        $(quantityInputId).val(quantity);
+        isCalculating = false;
+        
+        // 更新任务名称
+        if (context === 'create') {
+            updateTaskName();
+        } else {
+            updateEditTaskName();
+        }
+    }
+    
+    // 事件监听器
+    $('#taskSymbol').on('blur', function() {
+        const symbol = $(this).val().toUpperCase().trim();
+        if (symbol) {
+            fetchSymbolPrice(symbol, 'create');
+        }
+    });
+    
+    $('#taskQuantity').on('input', function() {
+        quantityToUsdt($(this).val(), 'create');
+    });
+    
+    $('#taskUsdtValue').on('input', function() {
+        usdtToQuantity($(this).val(), 'create');
+    });
+    
+    $('#editTaskSymbol').on('blur', function() {
+        const symbol = $(this).val().toUpperCase().trim();
+        if (symbol) {
+            fetchSymbolPrice(symbol, 'edit');
+        }
+    });
+    
+    $('#editTaskQuantity').on('input', function() {
+        quantityToUsdt($(this).val(), 'edit');
+    });
+    
+    $('#editTaskUsdtValue').on('input', function() {
+        usdtToQuantity($(this).val(), 'edit');
+    });
 
     $('#taskSymbol, #taskQuantity, #taskRounds').on('input change', updateTaskName);
     $('#editTaskSymbol, #editTaskQuantity, #editTaskRounds').on('input change', updateEditTaskName);
@@ -1027,6 +1169,18 @@ function populateEditForm(task) {
     
     // 更新任务名称
     updateEditTaskName();
+    
+    // 获取当前交易对的价格
+    const symbol = params.symbol || task.symbol || '';
+    if (symbol) {
+        fetchSymbolPrice(symbol, 'edit');
+        // 计算当前的USDT价值
+        setTimeout(() => {
+            if (currentPrice) {
+                quantityToUsdt($('#editTaskQuantity').val(), 'edit');
+            }
+        }, 1000);
+    }
 }
 
 // 删除任务
