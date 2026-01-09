@@ -305,7 +305,7 @@ class WalletService:
     def _test_spot_connection(wallet: Wallet) -> Tuple[bool, Optional[Dict[str, Any]]]:
         """测试现货钱包连接并获取余额"""
         try:
-            from spot_client import AsterSpotClient
+            from utils.spot_client import AsterSpotClient
             
             credentials = wallet.get_api_credentials()
             if not credentials['api_key'] or not credentials['secret_key']:
@@ -367,7 +367,7 @@ class WalletService:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
             
-            from futures_client import AsterFuturesClient
+            from utils.futures_client import AsterFuturesClient
             
             credentials = wallet.get_api_credentials()
             

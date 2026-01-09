@@ -11,12 +11,9 @@ from decimal import Decimal
 import sys
 import os
 
-import self
-
-# 添加父目录到路径以导入客户端
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from simple_trading_client import SimpleTradingClient
-from market_trading_client import MarketTradingClient
+# 导入交易客户端（现在位于utils目录）
+from utils.simple_trading_client import SimpleTradingClient
+from utils.market_trading_client import MarketTradingClient
 # 注意：不再使用SPOT_CONFIG回退，策略必须通过钱包配置获取API密钥
 
 

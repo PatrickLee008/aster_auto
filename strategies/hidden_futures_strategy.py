@@ -8,9 +8,8 @@ import sys
 import os
 import time
 
-# 添加父目录到路径以导入客户端
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from futures_client import AsterFuturesClient
+# 导入期货交易客户端（现在位于utils目录）
+from utils.futures_client import AsterFuturesClient
 # 注意：不再使用FUTURES_CONFIG回退，策略必须通过钱包配置获取期货账户信息
 
 
