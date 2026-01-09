@@ -444,7 +444,21 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title"><i class="fas fa-file-alt"></i> 任务日志</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <div class="d-flex align-items-center">
+                    <div class="form-check form-switch me-3">
+                        <input class="form-check-input" type="checkbox" id="autoRefreshSwitch" checked>
+                        <label class="form-check-label" for="autoRefreshSwitch">
+                            <small>自动刷新</small>
+                        </label>
+                    </div>
+                    <div class="form-check form-switch me-3">
+                        <input class="form-check-input" type="checkbox" id="autoScrollSwitch" checked>
+                        <label class="form-check-label" for="autoScrollSwitch">
+                            <small>自动滚动</small>
+                        </label>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
             </div>
             <div class="modal-body">
                 <pre id="taskLogsContent" style="max-height: 500px; overflow-y: auto; background-color: #f8f9fa; padding: 1rem; border-radius: 0.375rem;">
@@ -675,6 +689,27 @@ $(document).ready(function() {
             }
         });
     });
+    
+    // 日志模态框事件监听器
+    $('#autoRefreshSwitch').on('change', function() {
+        if ($(this).is(':checked')) {
+            startAutoRefresh();
+        } else {
+            stopAutoRefresh();
+        }
+    });
+    
+    // 模态框关闭时停止自动刷新
+    $('#taskLogsModal').on('hide.bs.modal', function() {
+        stopAutoRefresh();
+    });
+    
+    // 模态框显示时启动自动刷新
+    $('#taskLogsModal').on('show.bs.modal', function() {
+        if ($('#autoRefreshSwitch').is(':checked')) {
+            startAutoRefresh();
+        }
+    });
 });
 
 
@@ -739,11 +774,17 @@ function controlTask(taskId, action) {
     });
 }
 
+// 全局变量
+let autoRefreshTimer = null;
+
 // 查看任务日志
 function viewTaskLogs(taskId) {
     currentTaskId = taskId;
     $('#taskLogsModal').modal('show');
     loadTaskLogs(taskId);
+    
+    // 启动自动刷新
+    startAutoRefresh();
 }
 
 function loadTaskLogs(taskId) {
@@ -786,6 +827,9 @@ function loadTaskLogs(taskId) {
                     
                     // 正常显示日志内容
                     $('#taskLogsContent').text(logs);
+                    
+                    // 自动滚动到底部
+                    scrollToBottom();
                 }
             } else {
                 $('#taskLogsContent').html(`<div style="text-align: center; color: #dc3545; padding: 20px;">
@@ -823,6 +867,39 @@ function startTaskFromLogs(taskId) {
 function refreshLogs() {
     if (currentTaskId) {
         loadTaskLogs(currentTaskId);
+    }
+}
+
+// 自动滚动到底部
+function scrollToBottom() {
+    if ($('#autoScrollSwitch').is(':checked')) {
+        const logsContent = document.getElementById('taskLogsContent');
+        if (logsContent) {
+            setTimeout(() => {
+                logsContent.scrollTop = logsContent.scrollHeight;
+            }, 100);
+        }
+    }
+}
+
+// 启动自动刷新
+function startAutoRefresh() {
+    stopAutoRefresh(); // 先停止之前的定时器
+    
+    if ($('#autoRefreshSwitch').is(':checked')) {
+        autoRefreshTimer = setInterval(() => {
+            if ($('#autoRefreshSwitch').is(':checked') && currentTaskId && $('#taskLogsModal').hasClass('show')) {
+                loadTaskLogs(currentTaskId);
+            }
+        }, 3000); // 每3秒刷新一次
+    }
+}
+
+// 停止自动刷新
+function stopAutoRefresh() {
+    if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
     }
 }
 
