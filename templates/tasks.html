@@ -1106,13 +1106,16 @@ function fetchSymbolPrice(symbol, context = 'create') {
     $(priceInfoId).text('获取价格中...');
     $(quantityUnitId).text('-');
     
-    // 检查是否为稳定币
-    const stableCoins = ['USD1', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI'];
+    // 检查是否为稳定币（包括各种变体）
+    const stableCoins = ['USD1', 'USDC', 'BUSD', 'BUSD1', 'FDUSD', 'TUSD', 'USDP', 'DAI'];
+    console.log('检查稳定币:', symbol.toUpperCase(), '是否在列表中:', stableCoins.includes(symbol.toUpperCase()));
+    
     if (stableCoins.includes(symbol.toUpperCase())) {
         // 稳定币直接设置价格为1 USDT
         currentPrice = 1.0;
         $(priceInfoId).html(`价格: <strong>1.0</strong> USDT (稳定币)`);
         $(quantityUnitId).text(symbol.toUpperCase());
+        console.log('设置稳定币价格为1.0');
         return;
     }
     
