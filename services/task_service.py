@@ -128,6 +128,20 @@ class TaskService:
             if task.status == 'running':
                 return False, "任务已在运行中"
             
+            # 检查是否有同一个交易对的任务正在运行（全局检查，不限制用户）
+            running_same_symbol_task = Task.query.filter(
+                Task.symbol == task.symbol,
+                Task.status == 'running',
+                Task.id != task.id
+            ).first()
+            
+            if running_same_symbol_task:
+                # 获取运行中任务的用户名
+                from models import User
+                task_user = User.query.get(running_same_symbol_task.user_id)
+                username = task_user.username if task_user else "未知用户"
+                return False, f"交易对 {task.symbol} 正在被用户 '{username}' 的任务 '{running_same_symbol_task.name}' 使用，请先停止该任务"
+            
             # 记录任务启动日志
             task_logger.log_task_start(task.name, task.id, task.get_trading_parameters())
             
