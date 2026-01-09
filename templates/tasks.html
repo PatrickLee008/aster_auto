@@ -787,8 +787,11 @@ function viewTaskLogs(taskId) {
     startAutoRefresh();
 }
 
-function loadTaskLogs(taskId) {
-    $('#taskLogsContent').text('加载中...');
+function loadTaskLogs(taskId, silent = false) {
+    // 静默模式下不显示"加载中..."，避免显示框收缩
+    if (!silent) {
+        $('#taskLogsContent').text('加载中...');
+    }
     
     $.ajax({
         url: `/api/tasks/${taskId}/logs`,
@@ -828,8 +831,18 @@ function loadTaskLogs(taskId) {
                     // 正常显示日志内容
                     $('#taskLogsContent').text(logs);
                     
-                    // 自动滚动到底部
-                    scrollToBottom();
+                    // 自动滚动到底部 - 首次加载强制滚动，自动刷新智能滚动
+                    if (silent) {
+                        scrollToBottom(); // 自动刷新，智能滚动
+                    } else {
+                        // 首次加载，强制滚动到底部
+                        setTimeout(() => {
+                            const logsContent = document.getElementById('taskLogsContent');
+                            if (logsContent) {
+                                logsContent.scrollTop = logsContent.scrollHeight;
+                            }
+                        }, 100);
+                    }
                 }
             } else {
                 $('#taskLogsContent').html(`<div style="text-align: center; color: #dc3545; padding: 20px;">
@@ -875,9 +888,15 @@ function scrollToBottom() {
     if ($('#autoScrollSwitch').is(':checked')) {
         const logsContent = document.getElementById('taskLogsContent');
         if (logsContent) {
-            setTimeout(() => {
-                logsContent.scrollTop = logsContent.scrollHeight;
-            }, 100);
+            // 检查用户是否已经在底部附近（容忍50px的误差）
+            const isNearBottom = logsContent.scrollTop + logsContent.clientHeight >= logsContent.scrollHeight - 50;
+            
+            // 只有用户在底部附近时才自动滚动
+            if (isNearBottom) {
+                setTimeout(() => {
+                    logsContent.scrollTop = logsContent.scrollHeight;
+                }, 100);
+            }
         }
     }
 }
@@ -889,9 +908,9 @@ function startAutoRefresh() {
     if ($('#autoRefreshSwitch').is(':checked')) {
         autoRefreshTimer = setInterval(() => {
             if ($('#autoRefreshSwitch').is(':checked') && currentTaskId && $('#taskLogsModal').hasClass('show')) {
-                loadTaskLogs(currentTaskId);
+                loadTaskLogs(currentTaskId, true); // 使用静默模式
             }
-        }, 3000); // 每3秒刷新一次
+        }, 5000); // 每5秒刷新一次
     }
 }
 
