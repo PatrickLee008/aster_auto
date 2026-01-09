@@ -414,6 +414,16 @@ def get_symbol_price(symbol):
         symbol = symbol.upper().strip()
         strategy_id = request.args.get('strategy_id')
         
+        # 处理稳定币特殊情况 - 这些币种与USDT几乎等价
+        stable_coins = ['USD1', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI']
+        if symbol in stable_coins:
+            return jsonify({
+                'success': True,
+                'symbol': symbol,
+                'price': 1.0,  # 稳定币价格约为1 USDT
+                'source': 'stable_coin'
+            })
+        
         # 确定使用现货还是合约价格
         use_futures = False
         if strategy_id:

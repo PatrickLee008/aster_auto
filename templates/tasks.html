@@ -1097,7 +1097,7 @@ let isCalculating = false;
 
 // 获取交易对价格
 function fetchSymbolPrice(symbol, context = 'create') {
-    if (!symbol || symbol.length < 6) return;
+    if (!symbol) return;
     
     const priceInfoId = context === 'create' ? '#priceInfo' : '#editPriceInfo';
     const quantityUnitId = context === 'create' ? '#quantityUnit' : '#editQuantityUnit';
@@ -1105,6 +1105,19 @@ function fetchSymbolPrice(symbol, context = 'create') {
     
     $(priceInfoId).text('获取价格中...');
     $(quantityUnitId).text('-');
+    
+    // 检查是否为稳定币
+    const stableCoins = ['USD1', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI'];
+    if (stableCoins.includes(symbol.toUpperCase())) {
+        // 稳定币直接设置价格为1 USDT
+        currentPrice = 1.0;
+        $(priceInfoId).html(`价格: <strong>1.0</strong> USDT (稳定币)`);
+        $(quantityUnitId).text(symbol.toUpperCase());
+        return;
+    }
+    
+    // 如果不是稳定币，继续原有逻辑获取价格
+    if (symbol.length < 6) return;
     
     // 获取当前选中的策略ID
     const strategyId = $(strategySelectId).val();
@@ -1119,7 +1132,8 @@ function fetchSymbolPrice(symbol, context = 'create') {
             if (response.success) {
                 currentPrice = response.price;
                 const sourceText = response.source === 'futures' ? '(合约)' : 
-                                 response.source === 'spot_fallback' ? '(现货备用)' : '(现货)';
+                                 response.source === 'spot_fallback' ? '(现货备用)' : 
+                                 response.source === 'stable_coin' ? '(稳定币)' : '(现货)';
                 $(priceInfoId).html(`价格: <strong>${response.price}</strong> USDT ${sourceText}`);
                 
                 // 更新数量单位显示
