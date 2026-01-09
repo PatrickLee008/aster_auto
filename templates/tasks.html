@@ -488,23 +488,6 @@ $(document).ready(function() {
         return `${baseSymbol}_${qty}_${rounds}次`;
     }
 
-    function generateEditTaskName() {
-        const rawSymbol = ($('#editTaskSymbol').val() || '').toUpperCase().trim();
-        const qty = ($('#editTaskQuantity').val() || '').trim();
-        const rounds = ($('#editTaskRounds').val() || '').trim();
-        if (!rawSymbol || !qty || !rounds) {
-            return '';
-        }
-        const quoteSuffixes = ['USD1', 'USDT', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI', 'TRY', 'EUR', 'BRL', 'BTC', 'ETH', 'BNB', 'USD'];
-        let baseSymbol = rawSymbol;
-        for (const suffix of quoteSuffixes) {
-            if (rawSymbol.endsWith(suffix)) {
-                baseSymbol = rawSymbol.slice(0, -suffix.length) || rawSymbol;
-                break;
-            }
-        }
-        return `${baseSymbol}_${qty}_${rounds}次`;
-    }
 
     function updateTaskName() {
         const name = generateTaskName();
@@ -515,14 +498,6 @@ $(document).ready(function() {
         }
     }
 
-    function updateEditTaskName() {
-        const name = generateEditTaskName();
-        if (name) {
-            $('#editTaskName').val(name);
-        } else {
-            $('#editTaskName').val('');
-        }
-    }
 
     $('#taskSymbol, #taskQuantity, #taskRounds').on('input change', updateTaskName);
     $('#editTaskSymbol, #editTaskQuantity, #editTaskRounds').on('input change', updateEditTaskName);
@@ -898,6 +873,35 @@ function editTask(taskId) {
             alert('网络错误，无法获取任务信息');
         }
     });
+}
+
+// 生成编辑任务名称
+function generateEditTaskName() {
+    const rawSymbol = ($('#editTaskSymbol').val() || '').toUpperCase().trim();
+    const qty = ($('#editTaskQuantity').val() || '').trim();
+    const rounds = ($('#editTaskRounds').val() || '').trim();
+    if (!rawSymbol || !qty || !rounds) {
+        return '';
+    }
+    const quoteSuffixes = ['USD1', 'USDT', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI', 'TRY', 'EUR', 'BRL', 'BTC', 'ETH', 'BNB', 'USD'];
+    let baseSymbol = rawSymbol;
+    for (const suffix of quoteSuffixes) {
+        if (rawSymbol.endsWith(suffix)) {
+            baseSymbol = rawSymbol.slice(0, -suffix.length) || rawSymbol;
+            break;
+        }
+    }
+    return `${baseSymbol}_${qty}_${rounds}次`;
+}
+
+// 更新编辑任务名称
+function updateEditTaskName() {
+    const name = generateEditTaskName();
+    if (name) {
+        $('#editTaskName').val(name);
+    } else {
+        $('#editTaskName').val('');
+    }
 }
 
 // 填充编辑表单
