@@ -217,8 +217,14 @@ def run_task(task_id: int):
                 logger.info("任务执行完成")
                 task.update_status('stopped')
             else:
-                logger.error("任务执行失败")
-                task.update_status('error', error_message="策略执行失败")
+                # 检查策略实例是否有错误信息
+                if hasattr(strategy_instance, 'error_message') and strategy_instance.error_message:
+                    error_msg = strategy_instance.error_message
+                    logger.error(f"任务执行失败: {error_msg}")
+                    task.update_status('error', error_message=error_msg)
+                else:
+                    logger.error("任务执行失败")
+                    task.update_status('error', error_message="策略执行失败")
             
             # 释放任务代理资源
             if task_proxy and task_proxy.get('proxy_enabled'):

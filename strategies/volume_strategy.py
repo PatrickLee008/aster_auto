@@ -98,6 +98,13 @@ class VolumeStrategy:
         # 优雅停止标志
         self.stop_requested = False
         self.setup_signal_handlers()
+
+        # 订单簿获取失败计数
+        self.order_book_fail_count = 0
+        self.max_order_book_fails = 3  # 最大失败次数
+
+        # 错误信息（用于传递给任务状态）
+        self.error_message = None
         
         self.log(f"=== 刷量策略初始化 ===")
         self.log(f"交易对: {symbol}, 数量: {quantity}, 间隔: {interval}秒, 轮次: {rounds}次")
@@ -465,9 +472,22 @@ class VolumeStrategy:
             # 获取订单簿
             book_data = self.get_order_book()
             if not book_data:
-                self.log(f"⚠️ 无法获取订单簿，等待2秒后重试")
+                self.order_book_fail_count += 1
+                self.log(f"⚠️ 无法获取订单簿，失败次数: {self.order_book_fail_count}/{self.max_order_book_fails}")
+
+                if self.order_book_fail_count >= self.max_order_book_fails:
+                    error_msg = "无法获取订单簿"
+                    self.log(f"❌ {error_msg}，连续失败{self.order_book_fail_count}次，停止任务", "error")
+                    self.error_message = error_msg
+                    self.stop_requested = True
+                    return None, None
+
+                self.log(f"等待2秒后重试")
                 time.sleep(2)
                 continue
+
+            # 成功获取订单簿，重置失败计数
+            self.order_book_fail_count = 0
                 
             # 计算价差
             spread = book_data['ask_price'] - book_data['bid_price']
