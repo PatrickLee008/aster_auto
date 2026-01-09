@@ -1106,8 +1106,8 @@ function fetchSymbolPrice(symbol, context = 'create') {
     $(priceInfoId).text('获取价格中...');
     $(quantityUnitId).text('-');
     
-    // 检查是否为稳定币（包括各种变体）
-    const stableCoins = ['USD1', 'USDC', 'BUSD', 'BUSD1', 'FDUSD', 'TUSD', 'USDP', 'DAI'];
+    // 检查是否为稳定币（只检查单独的稳定币符号，不包括交易对）
+    const stableCoins = ['USD1', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI'];
     console.log('检查稳定币:', symbol.toUpperCase(), '是否在列表中:', stableCoins.includes(symbol.toUpperCase()));
     
     if (stableCoins.includes(symbol.toUpperCase())) {
@@ -1117,6 +1117,15 @@ function fetchSymbolPrice(symbol, context = 'create') {
         $(quantityUnitId).text(symbol.toUpperCase());
         console.log('设置稳定币价格为1.0');
         return;
+    }
+    
+    // 检查交易对是否以稳定币计价（如BUSD1表示BUSD以USD1计价）
+    for (const stableCoin of stableCoins) {
+        if (symbol.toUpperCase().endsWith(stableCoin)) {
+            console.log('检测到以稳定币计价的交易对:', symbol, '计价币:', stableCoin);
+            // 对于以稳定币计价的交易对，我们需要获取真实价格
+            break;
+        }
     }
     
     // 如果不是稳定币，继续原有逻辑获取价格
@@ -1137,7 +1146,20 @@ function fetchSymbolPrice(symbol, context = 'create') {
                 const sourceText = response.source === 'futures' ? '(合约)' : 
                                  response.source === 'spot_fallback' ? '(现货备用)' : 
                                  response.source === 'stable_coin' ? '(稳定币)' : '(现货)';
-                $(priceInfoId).html(`价格: <strong>${response.price}</strong> USDT ${sourceText}`);
+                
+                // 检查是否为稳定币计价的交易对
+                const stableQuoteCoins = ['USD1', 'USDC', 'FDUSD', 'TUSD', 'USDP'];
+                let displayPrice = response.price;
+                let priceUnit = 'USDT';
+                
+                for (const quoteCoin of stableQuoteCoins) {
+                    if (symbol.toUpperCase().endsWith(quoteCoin)) {
+                        priceUnit = quoteCoin + ' ≈ USDT';
+                        break;
+                    }
+                }
+                
+                $(priceInfoId).html(`价格: <strong>${displayPrice}</strong> ${priceUnit} ${sourceText}`);
                 
                 // 更新数量单位显示
                 const baseSymbol = getBaseSymbol(symbol);
