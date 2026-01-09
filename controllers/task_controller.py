@@ -408,15 +408,16 @@ def cleanup_orphan_tasks():
 def get_symbol_price(symbol):
     """获取交易对价格API"""
     try:
-        from utils.spot_client import SpotClient
-        from utils.futures_client import FuturesClient
+        from utils.spot_client import AsterSpotClient
         
         symbol = symbol.upper().strip()
         
-        # 先尝试现货API获取价格
+        # 尝试现货API获取价格
         try:
-            spot_client = SpotClient()
+            # 使用空的API密钥创建客户端，仅用于获取公开价格信息
+            spot_client = AsterSpotClient(api_key="", secret_key="", use_proxy=False)
             price_data = spot_client.get_price(symbol)
+            
             if price_data and 'price' in price_data:
                 return jsonify({
                     'success': True,
@@ -424,27 +425,18 @@ def get_symbol_price(symbol):
                     'price': float(price_data['price']),
                     'source': 'spot'
                 })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': f"未找到交易对 {symbol} 的价格信息"
+                }), 404
+                
         except Exception as e:
             print(f"现货API获取价格失败: {e}")
-        
-        # 如果现货失败，尝试合约API
-        try:
-            futures_client = FuturesClient()
-            price_data = futures_client.get_price(symbol)
-            if price_data and 'price' in price_data:
-                return jsonify({
-                    'success': True,
-                    'symbol': symbol,
-                    'price': float(price_data['price']),
-                    'source': 'futures'
-                })
-        except Exception as e:
-            print(f"合约API获取价格失败: {e}")
-        
-        return jsonify({
-            'success': False,
-            'message': f"无法获取 {symbol} 的价格信息"
-        }), 404
+            return jsonify({
+                'success': False,
+                'message': f"获取价格失败: {str(e)}"
+            }), 500
         
     except Exception as e:
         return jsonify({
