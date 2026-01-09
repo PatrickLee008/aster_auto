@@ -411,8 +411,17 @@ def get_symbol_price(symbol):
         from utils.spot_client import AsterSpotClient
         from models import Strategy
         
+        # 添加调试信息
+        print(f"=== 价格API调试信息 ===")
+        print(f"接收到的原始symbol参数: '{symbol}'")
+        print(f"请求URL路径: {request.path}")
+        print(f"请求参数: {dict(request.args)}")
+        
         symbol = symbol.upper().strip()
         strategy_id = request.args.get('strategy_id')
+        
+        print(f"处理后的symbol: '{symbol}'")
+        print(f"Strategy ID: {strategy_id}")
         
         # 处理稳定币特殊情况 - 这些币种与USDT几乎等价
         stable_coins = ['USD1', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI']

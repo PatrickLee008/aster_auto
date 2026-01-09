@@ -546,12 +546,32 @@ $(document).ready(function() {
 
 
     
-    // 事件监听器
-    $('#taskSymbol').on('blur input change', function() {
-        const symbol = $(this).val().toUpperCase().trim();
-        if (symbol && symbol.length >= 4) {  // 最少4个字符就尝试获取价格
-            console.log('创建任务 - 交易对变化:', symbol);
-            fetchSymbolPrice(symbol, 'create');
+    // 事件监听器 - 使用防抖函数避免频繁请求
+    let priceTimer = null;
+    $('#taskSymbol').on('input change blur', function() {
+        const currentValue = $(this).val();
+        const symbol = currentValue.toUpperCase().trim();
+        console.log(`=== taskSymbol事件触发 ===`);
+        console.log(`原始输入值: "${currentValue}"`);
+        console.log(`处理后交易对: "${symbol}"`);
+        console.log(`当前时间: ${new Date().toLocaleTimeString()}`);
+        
+        // 清除之前的定时器
+        if (priceTimer) {
+            console.log('清除之前的价格获取定时器');
+            clearTimeout(priceTimer);
+        }
+        
+        if (symbol && symbol.length >= 4) {
+            // 延迟500ms执行，避免频繁请求
+            priceTimer = setTimeout(() => {
+                console.log(`=== 执行价格获取 ===`);
+                console.log(`最终交易对: "${symbol}"`);
+                console.log(`调用 fetchSymbolPrice(${symbol}, 'create')`);
+                fetchSymbolPrice(symbol, 'create');
+            }, 500);
+        } else {
+            console.log('交易对长度不足或为空，跳过价格获取');
         }
     });
     
@@ -570,10 +590,18 @@ $(document).ready(function() {
     });
     
     $('#editTaskSymbol').on('blur input change', function() {
-        const symbol = $(this).val().toUpperCase().trim();
+        const currentValue = $(this).val();
+        const symbol = currentValue.toUpperCase().trim();
+        console.log(`=== editTaskSymbol事件触发 ===`);
+        console.log(`原始输入值: "${currentValue}"`);
+        console.log(`处理后交易对: "${symbol}"`);
+        console.log(`当前时间: ${new Date().toLocaleTimeString()}`);
+        
         if (symbol && symbol.length >= 4) {  // 最少4个字符就尝试获取价格
-            console.log('编辑任务 - 交易对变化:', symbol);
+            console.log(`调用 fetchSymbolPrice(${symbol}, 'edit')`);
             fetchSymbolPrice(symbol, 'edit');
+        } else {
+            console.log('编辑任务 - 交易对长度不足或为空，跳过价格获取');
         }
     });
     
@@ -1099,10 +1127,15 @@ let isCalculating = false;
 
 // 获取交易对价格
 function fetchSymbolPrice(symbol, context = 'create') {
-    if (!symbol) return;
+    if (!symbol) {
+        console.log('fetchSymbolPrice: symbol为空，返回');
+        return;
+    }
     
     symbol = symbol.toUpperCase().trim(); // 确保统一格式
-    console.log(`fetchSymbolPrice被调用: symbol=${symbol}, context=${context}`);
+    console.log(`=== fetchSymbolPrice调试信息 ===`);
+    console.log(`调用参数: symbol=${symbol}, context=${context}`);
+    console.log(`当前时间戳: ${Date.now()}`);
     
     const priceInfoId = context === 'create' ? '#priceInfo' : '#editPriceInfo';
     const quantityUnitId = context === 'create' ? '#quantityUnit' : '#editQuantityUnit';
@@ -1113,20 +1146,20 @@ function fetchSymbolPrice(symbol, context = 'create') {
     
     // 检查是否为稳定币（只检查单独的稳定币符号，不包括交易对）
     const stableCoins = ['USD1', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USDP', 'DAI'];
-    console.log('检查稳定币:', symbol.toUpperCase(), '是否在列表中:', stableCoins.includes(symbol.toUpperCase()));
+    console.log('检查稳定币:', symbol, '是否在列表中:', stableCoins.includes(symbol));
     
-    if (stableCoins.includes(symbol.toUpperCase())) {
+    if (stableCoins.includes(symbol)) {
         // 稳定币直接设置价格为1 USDT
         currentPrice = 1.0;
         $(priceInfoId).html(`价格: <strong>1.0</strong> USDT (稳定币)`);
-        $(quantityUnitId).text(symbol.toUpperCase());
+        $(quantityUnitId).text(symbol);
         console.log('设置稳定币价格为1.0');
         return;
     }
     
     // 检查交易对是否以稳定币计价（如BUSD1表示BUSD以USD1计价）
     for (const stableCoin of stableCoins) {
-        if (symbol.toUpperCase().endsWith(stableCoin)) {
+        if (symbol.endsWith(stableCoin)) {
             console.log('检测到以稳定币计价的交易对:', symbol, '计价币:', stableCoin);
             // 对于以稳定币计价的交易对，我们需要获取真实价格
             break;
@@ -1134,21 +1167,39 @@ function fetchSymbolPrice(symbol, context = 'create') {
     }
     
     // 如果不是稳定币，继续原有逻辑获取价格
-    if (symbol.length < 6) return;
+    if (symbol.length < 4) {
+        console.log('交易对长度不足，返回');
+        return;
+    }
     
     // 获取当前选中的策略ID
     const strategyId = $(strategySelectId).val();
-    const url = strategyId ? 
-        `/api/tasks/price/${symbol}?strategy_id=${strategyId}` : 
-        `/api/tasks/price/${symbol}`;
     
-    console.log(`发送价格请求: ${url}`);
+    // 构建URL - 添加时间戳避免缓存
+    const timestamp = Date.now();
+    let url;
+    if (strategyId) {
+        url = `/api/tasks/price/${symbol}?strategy_id=${strategyId}&_=${timestamp}`;
+    } else {
+        url = `/api/tasks/price/${symbol}?_=${timestamp}`;
+    }
+    
+    console.log(`构建的API请求URL: ${url}`);
+    console.log(`Strategy ID: ${strategyId}`);
     
     $.ajax({
         url: url,
         method: 'GET',
         cache: false, // 禁用缓存，确保每次都是新请求
+        headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        },
         success: function(response) {
+            console.log(`=== API响应成功 ===`);
+            console.log(`请求的交易对: ${symbol}`);
+            console.log(`响应数据:`, response);
             if (response.success) {
                 currentPrice = response.price;
                 const sourceText = response.source === 'futures' ? '(合约)' : 
@@ -1173,12 +1224,21 @@ function fetchSymbolPrice(symbol, context = 'create') {
                 const baseSymbol = getBaseSymbol(symbol);
                 $(quantityUnitId).text(baseSymbol);
             } else {
+                console.log(`=== API响应失败 ===`);
+                console.log(`请求的交易对: ${symbol}`);
+                console.log(`失败原因: ${response.message}`);
                 $(priceInfoId).text('获取价格失败: ' + response.message);
                 currentPrice = null;
                 $(quantityUnitId).text('-');
             }
         },
-        error: function() {
+        error: function(xhr, status, error) {
+            console.log(`=== API请求错误 ===`);
+            console.log(`请求的交易对: ${symbol}`);
+            console.log(`错误状态: ${status}`);
+            console.log(`错误信息: ${error}`);
+            console.log(`响应状态码: ${xhr.status}`);
+            console.log(`响应内容: ${xhr.responseText}`);
             $(priceInfoId).text('网络错误，无法获取价格');
             currentPrice = null;
             $(quantityUnitId).text('-');
