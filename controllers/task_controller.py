@@ -409,34 +409,87 @@ def get_symbol_price(symbol):
     """获取交易对价格API"""
     try:
         from utils.spot_client import AsterSpotClient
+        from models import Strategy
         
         symbol = symbol.upper().strip()
+        strategy_id = request.args.get('strategy_id')
+        
+        # 确定使用现货还是合约价格
+        use_futures = False
+        if strategy_id:
+            try:
+                strategy = Strategy.query.get(int(strategy_id))
+                if strategy and strategy.supported_wallet_types:
+                    # 如果策略支持合约交易，优先使用合约价格
+                    if 'futures' in strategy.supported_wallet_types:
+                        use_futures = True
+            except (ValueError, TypeError):
+                pass
         
         # 尝试现货API获取价格
-        try:
-            # 使用空的API密钥创建客户端，仅用于获取公开价格信息
-            spot_client = AsterSpotClient(api_key="", secret_key="", use_proxy=False)
-            price_data = spot_client.get_price(symbol)
-            
-            if price_data and 'price' in price_data:
-                return jsonify({
-                    'success': True,
-                    'symbol': symbol,
-                    'price': float(price_data['price']),
-                    'source': 'spot'
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'message': f"未找到交易对 {symbol} 的价格信息"
-                }), 404
+        if not use_futures:
+            try:
+                # 使用空的API密钥创建客户端，仅用于获取公开价格信息
+                spot_client = AsterSpotClient(api_key="", secret_key="", use_proxy=False)
+                price_data = spot_client.get_price(symbol)
                 
-        except Exception as e:
-            print(f"现货API获取价格失败: {e}")
-            return jsonify({
-                'success': False,
-                'message': f"获取价格失败: {str(e)}"
-            }), 500
+                if price_data and 'price' in price_data:
+                    return jsonify({
+                        'success': True,
+                        'symbol': symbol,
+                        'price': float(price_data['price']),
+                        'source': 'spot'
+                    })
+                    
+            except Exception as e:
+                print(f"现货API获取价格失败: {e}")
+        
+        # 合约价格获取（备用方案或优先方案）
+        if use_futures:
+            try:
+                # 对于合约价格，我们可以尝试使用简单的HTTP请求
+                # 因为合约客户端需要复杂的初始化参数
+                import requests
+                
+                # 尝试直接调用合约价格API
+                response = requests.get(
+                    f"https://fapi.asterdex.com/fapi/v3/ticker/price?symbol={symbol}",
+                    timeout=5,
+                    verify=False
+                )
+                
+                if response.status_code == 200:
+                    price_data = response.json()
+                    if price_data and 'price' in price_data:
+                        return jsonify({
+                            'success': True,
+                            'symbol': symbol,
+                            'price': float(price_data['price']),
+                            'source': 'futures'
+                        })
+                        
+            except Exception as e:
+                print(f"合约API获取价格失败: {e}")
+                
+                # 如果合约失败，回退到现货价格
+                try:
+                    spot_client = AsterSpotClient(api_key="", secret_key="", use_proxy=False)
+                    price_data = spot_client.get_price(symbol)
+                    
+                    if price_data and 'price' in price_data:
+                        return jsonify({
+                            'success': True,
+                            'symbol': symbol,
+                            'price': float(price_data['price']),
+                            'source': 'spot_fallback'
+                        })
+                except Exception as e2:
+                    print(f"现货备用API也失败: {e2}")
+        
+        return jsonify({
+            'success': False,
+            'message': f"无法获取 {symbol} 的价格信息"
+        }), 404
         
     except Exception as e:
         return jsonify({

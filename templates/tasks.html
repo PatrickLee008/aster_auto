@@ -588,6 +588,21 @@ $(document).ready(function() {
             usdtToQuantity(usdtValue, 'edit');
         }
     });
+    
+    // 策略选择变化时重新获取价格
+    $('#taskStrategy').on('change', function() {
+        const symbol = $('#taskSymbol').val().toUpperCase().trim();
+        if (symbol && symbol.length >= 6) {
+            fetchSymbolPrice(symbol, 'create');
+        }
+    });
+    
+    $('#editTaskStrategy').on('change', function() {
+        const symbol = $('#editTaskSymbol').val().toUpperCase().trim();
+        if (symbol && symbol.length >= 6) {
+            fetchSymbolPrice(symbol, 'edit');
+        }
+    });
 
     $('#taskSymbol, #taskQuantity, #taskRounds').on('input change', updateTaskName);
     $('#editTaskSymbol, #editTaskQuantity, #editTaskRounds').on('input change', updateEditTaskName);
@@ -1086,17 +1101,26 @@ function fetchSymbolPrice(symbol, context = 'create') {
     
     const priceInfoId = context === 'create' ? '#priceInfo' : '#editPriceInfo';
     const quantityUnitId = context === 'create' ? '#quantityUnit' : '#editQuantityUnit';
+    const strategySelectId = context === 'create' ? '#taskStrategy' : '#editTaskStrategy';
     
     $(priceInfoId).text('获取价格中...');
     $(quantityUnitId).text('-');
     
+    // 获取当前选中的策略ID
+    const strategyId = $(strategySelectId).val();
+    const url = strategyId ? 
+        `/api/tasks/price/${symbol}?strategy_id=${strategyId}` : 
+        `/api/tasks/price/${symbol}`;
+    
     $.ajax({
-        url: `/api/tasks/price/${symbol}`,
+        url: url,
         method: 'GET',
         success: function(response) {
             if (response.success) {
                 currentPrice = response.price;
-                $(priceInfoId).html(`价格: <strong>${response.price}</strong> USDT`);
+                const sourceText = response.source === 'futures' ? '(合约)' : 
+                                 response.source === 'spot_fallback' ? '(现货备用)' : '(现货)';
+                $(priceInfoId).html(`价格: <strong>${response.price}</strong> USDT ${sourceText}`);
                 
                 // 更新数量单位显示
                 const baseSymbol = getBaseSymbol(symbol);
