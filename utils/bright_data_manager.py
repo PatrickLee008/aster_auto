@@ -151,9 +151,9 @@ class BrightDataManager:
                 'https': proxy_url
             }
                 
-            # 使用可靠的服务来获取IP地址
-            # httpbin.org是可靠的IP检测服务，返回格式为 {"origin": "xxx.xxx.xxx.xxx"}
-            test_url = 'https://httpbin.org/ip'
+            # 使用可靠的IP检测服务，同时保留位置信息获取
+            # 结合使用httpbin.org获取IP和geo.brdtest.com获取位置信息
+            test_url = 'https://geo.brdtest.com/welcome.txt?product=isp&method=native'
                 
             # 记录开始测试时间以计算延迟
             import time
@@ -173,23 +173,34 @@ class BrightDataManager:
             latency_ms = round((end_time - start_time) * 1000)
                 
             if response.status_code == 200:
-                # httpbin.org返回JSON格式: {"origin": "xxx.xxx.xxx.xxx"}
-                try:
-                    ip_info = response.json()
-                    current_ip = ip_info.get('origin', 'unknown')
-                                
-                    # httpbin不提供位置信息，因此使用之前的逻辑获取位置信息
-                    # 但我们可以尝试通过IP地址获取位置信息
-                    country = 'Unknown'
-                    region = 'Unknown'
-                    city = 'Unknown'
-                                
-                except Exception as e:
-                    self.logger.warning(f"解析httpbin响应失败: {e}")
-                    current_ip = 'unknown'
-                    country = 'Unknown'
-                    region = 'Unknown'
-                    city = 'Unknown'
+                # geo.brdtest.com返回文本格式响应，需要解析IP和位置信息
+                content = response.text
+                current_ip = 'unknown'
+                country = 'Unknown'
+                region = 'Unknown'
+                city = 'Unknown'
+                            
+                # 从文本内容中提取位置信息
+                lines = content.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('Country:'):
+                        country = line.replace('Country:', '').strip()
+                    elif line.startswith('Region:'):
+                        region = line.replace('Region:', '').strip()
+                    elif line.startswith('City:'):
+                        city = line.replace('City:', '').strip()
+                            
+                # 尝试从文本中提取IP地址，但避免提取1.1.1.1这类公共IP
+                import re
+                ip_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
+                ip_matches = re.findall(ip_pattern, content)
+                            
+                # 过滤掉公共IP地址
+                for ip_match in ip_matches:
+                    if not ip_match.startswith('1.1.1.') and ip_match != '1.1.1.1' and not ip_match.startswith('8.8.8') and not ip_match.startswith('208.67'):
+                        current_ip = ip_match
+                        break
                             
                 proxy_config['current_ip'] = current_ip
                 proxy_config['actual_country'] = country
