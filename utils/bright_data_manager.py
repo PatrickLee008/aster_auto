@@ -36,7 +36,7 @@ class BrightDataManager:
         # 日志
         self.logger = logging.getLogger(__name__)
         
-    def get_proxy_for_task(self, task_id: int, proxy_type: str = 'residential') -> Optional[Dict]:
+    def get_proxy_for_task(self, task_id: int, proxy_type: str = 'isp') -> Optional[Dict]:
         """
         为任务获取专用代理
 
@@ -57,13 +57,15 @@ class BrightDataManager:
         # 检查缓存
         cache_key = f"{task_id}_{proxy_type}"
         if cache_key in self.task_proxy_cache:
-            return self.task_proxy_cache[cache_key]
+            # 返回缓存的代理配置，但更新时间戳
+            cached_proxy = self.task_proxy_cache[cache_key]
+            return cached_proxy
         
         try:
             proxy_config = self._create_proxy_config(task_id, proxy_type)
             
-            # 测试代理连接
-            test_success = self._test_proxy_connection(proxy_config)
+            # 测试代理连接并测量延迟
+            test_success, latency = self._test_proxy_connection_with_latency(proxy_config)
             
             if test_success:
                 # 测试成功，记录IP信息
@@ -75,12 +77,14 @@ class BrightDataManager:
                 self.logger.info(f"   代理类型: {proxy_type}")
                 self.logger.info(f"   代理IP: {current_ip}")
                 self.logger.info(f"   位置: {actual_region}, {actual_country}")
+                self.logger.info(f"   延迟: {latency}ms")
             else:
                 self.logger.warning(f"⚠️ 任务 {task_id} 代理连接测试失败，但仍分配代理（可能是网络波动）")
                 # 设置默认值
                 proxy_config['current_ip'] = 'unknown'
                 proxy_config['actual_country'] = 'Unknown'
                 proxy_config['actual_region'] = 'Unknown'
+                proxy_config['latency'] = 9999  # 高延迟标记
             
             # 无论测试结果如何都分配代理
             self.task_proxy_cache[cache_key] = proxy_config
@@ -128,52 +132,52 @@ class BrightDataManager:
             'display_info': f"{proxy_type.title()} IP (会话: {session_id}, {self.session_duration}分钟)"
         }
     
-    def _test_proxy_connection(self, proxy_config: Dict) -> bool:
-        """测试代理连接"""
+    def _test_proxy_connection_with_latency(self, proxy_config: Dict) -> tuple[bool, int]:
+        """测试代理连接并返回延迟"""
         try:
             # 使用Bright Data官方推荐的测试URL
             username = proxy_config['username']
             password = proxy_config['password'] 
             host = proxy_config['host']
             port = proxy_config['port']
-            
+                
             proxy_url = f"http://{username}:{password}@{host}:{port}"
             proxies = {
                 'http': proxy_url,
                 'https': proxy_url
             }
-            
+                
             # 使用Bright Data的IP测试URL
             test_url = 'https://lumtest.com/myip.json'
-            
+                
             # 记录开始测试时间以计算延迟
             import time
             start_time = time.time()
-            
+                
             self.logger.info(f"🔍 开始测试代理连接: {host}:{port}")
-            
+                
             response = requests.get(
                 test_url,
                 proxies=proxies,
                 timeout=15,  # 增加超时时间到15秒
                 headers={'User-Agent': 'AsterAuto/1.0'}
             )
-            
+                
             # 计算延迟（毫秒）
             end_time = time.time()
             latency_ms = round((end_time - start_time) * 1000)
-            
+                
             if response.status_code == 200:
                 ip_info = response.json()
-                
+                    
                 # Bright Data API通常直接返回IP
                 current_ip = ip_info.get('ip', ip_info.get('current_ip', 'unknown'))
-                
+                    
                 # 获取位置信息
                 country = ip_info.get('country', ip_info.get('geo', {}).get('country', 'Unknown'))
                 region = ip_info.get('region', ip_info.get('geo', {}).get('region', 'Unknown'))
                 city = ip_info.get('city', ip_info.get('geo', {}).get('city', 'Unknown'))
-                            
+                                        
                 # 尝试从其他可能的字段获取位置信息
                 if country == 'Unknown':
                     country = ip_info.get('country_code', 'Unknown')
@@ -181,31 +185,36 @@ class BrightDataManager:
                     region = ip_info.get('region_code', 'Unknown')
                 if city == 'Unknown':
                     city = ip_info.get('city_name', 'Unknown')
-                
+                    
                 proxy_config['current_ip'] = current_ip
                 proxy_config['actual_country'] = country
                 proxy_config['actual_region'] = f"{city}, {region}"
                 proxy_config['latency'] = latency_ms  # 添加延迟信息
-                
+                    
                 self.logger.info(f"✅ 代理测试成功 - IP: {current_ip}, 位置: {region}, {country}, 延迟: {latency_ms}ms")
-                return True
+                return True, latency_ms
             else:
                 self.logger.warning(f"❌ 代理测试HTTP错误: {response.status_code}")
                 self.logger.warning(f"响应内容: {response.text[:200]}")
-                return False
-                
+                return False, 9999
+                    
         except requests.exceptions.Timeout as e:
             self.logger.warning(f"⏱️ 代理连接测试超时(15秒): {e}")
-            return False
+            return False, 9999
         except requests.exceptions.ProxyError as e:
             self.logger.warning(f"🚫 代理连接错误: {e}")
-            return False
+            return False, 9999
         except requests.exceptions.ConnectionError as e:
             self.logger.warning(f"🔌 网络连接错误: {e}")
-            return False
+            return False, 9999
         except Exception as e:
             self.logger.warning(f"❌ 代理连接测试失败: {type(e).__name__} - {e}")
-            return False
+            return False, 9999
+    
+    def _test_proxy_connection(self, proxy_config: Dict) -> bool:
+        """兼容旧方法：测试代理连接"""
+        success, _ = self._test_proxy_connection_with_latency(proxy_config)
+        return success
     
     def get_proxy_dict_for_requests(self, proxy_config: Dict) -> Dict[str, str]:
         """
@@ -257,7 +266,7 @@ def get_bright_data_manager() -> BrightDataManager:
     return _proxy_manager
 
 
-def get_task_bright_data_config(task_id: int, proxy_type: str = 'residential') -> Dict:
+def get_task_bright_data_config(task_id: int, proxy_type: str = 'isp') -> Dict:
     """
     便捷函数：获取任务的Bright Data代理配置
 

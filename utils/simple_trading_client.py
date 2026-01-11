@@ -37,10 +37,34 @@ class SimpleTradingClient:
                 'http': proxy_url,
                 'https': proxy_url
             }
+            
+            # 优化请求适配器以提高性能
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            
+            # 配置重试策略
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=0.1,
+                status_forcelist=[429, 500, 502, 503, 504],
+            )
+            adapter = HTTPAdapter(
+                max_retries=retry_strategy,
+                pool_connections=10,  # 增加连接池大小
+                pool_maxsize=10       # 增加最大连接数
+            )
+            
+            # 为会话配置适配器
+            self.session = requests.Session()
+            self.session.mount("http://", adapter)
+            self.session.mount("https://", adapter)
+            
             print(f"简化交易客户端初始化完成")
             print(f"使用任务专用代理: {proxy_config.get('proxy_type', 'unknown')} - {proxy_config.get('country', 'unknown')}")
             if proxy_config.get('current_ip'):
                 print(f"代理IP: {proxy_config.get('current_ip')}")
+            if proxy_config.get('latency'):
+                print(f"代理延迟: {proxy_config.get('latency')}ms")
         # 回退到全局代理配置
         elif PROXY_CONFIG['enabled']:
             proxy_url = f"{PROXY_CONFIG['type']}://{PROXY_CONFIG['host']}:{PROXY_CONFIG['port']}"
@@ -48,17 +72,55 @@ class SimpleTradingClient:
                 'http': proxy_url,
                 'https': proxy_url
             }
+            
+            # 配置会话适配器
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=0.1,
+                status_forcelist=[429, 500, 502, 503, 504],
+            )
+            adapter = HTTPAdapter(
+                max_retries=retry_strategy,
+                pool_connections=10,
+                pool_maxsize=10
+            )
+            
+            self.session = requests.Session()
+            self.session.mount("http://", adapter)
+            self.session.mount("https://", adapter)
+            
             print(f"简化交易客户端初始化完成")
             print(f"使用全局代理: {self.proxies['https']}")
         else:
-            self.proxies = None
+            # 即使没有代理也配置会话适配器
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=0.1,
+                status_forcelist=[429, 500, 502, 503, 504],
+            )
+            adapter = HTTPAdapter(
+                max_retries=retry_strategy,
+                pool_connections=10,
+                pool_maxsize=10
+            )
+            
+            self.session = requests.Session()
+            self.session.mount("http://", adapter)
+            self.session.mount("https://", adapter)
+            
             print(f"简化交易客户端初始化完成")
             print("未启用代理")
     
     def get_server_time(self) -> int:
         """获取服务器时间"""
         try:
-            response = requests.get(
+            response = self.session.get(
                 f"{self.host}/api/v1/time",
                 proxies=self.proxies,
                 timeout=10
@@ -72,7 +134,7 @@ class SimpleTradingClient:
     def test_connection(self) -> bool:
         """测试连接"""
         try:
-            response = requests.get(
+            response = self.session.get(
                 f"{self.host}/api/v1/ping",
                 proxies=self.proxies,
                 timeout=10
@@ -105,7 +167,7 @@ class SimpleTradingClient:
             
             params['signature'] = signature
             
-            response = requests.get(
+            response = self.session.get(
                 f"{self.host}/api/v1/account",
                 params=params,
                 headers={'X-MBX-APIKEY': self.api_key},
@@ -126,7 +188,7 @@ class SimpleTradingClient:
     def get_book_ticker(self, symbol: str) -> Optional[Dict[str, Any]]:
         """获取最优挂单价格"""
         try:
-            response = requests.get(
+            response = self.session.get(
                 f"{self.host}/api/v1/ticker/bookTicker",
                 params={'symbol': symbol},
                 proxies=self.proxies,
@@ -144,7 +206,7 @@ class SimpleTradingClient:
     def get_depth(self, symbol: str, limit: int = 5) -> Optional[Dict[str, Any]]:
         """获取深度数据"""
         try:
-            response = requests.get(
+            response = self.session.get(
                 f"{self.host}/api/v1/depth",
                 params={'symbol': symbol, 'limit': limit},
                 proxies=self.proxies,
@@ -201,7 +263,7 @@ class SimpleTradingClient:
             params['signature'] = signature
             
             # 发送请求
-            response = requests.post(
+            response = self.session.post(
                 f"{self.host}/api/v1/order",
                 data=params,
                 headers={
@@ -269,7 +331,7 @@ class SimpleTradingClient:
             
             params['signature'] = signature
             
-            response = requests.delete(
+            response = self.session.delete(
                 f"{self.host}/api/v1/order",
                 data=params,
                 headers={
@@ -321,7 +383,7 @@ class SimpleTradingClient:
             
             params['signature'] = signature
             
-            response = requests.get(
+            response = self.session.get(
                 f"{self.host}/api/v1/order",
                 params=params,
                 headers={'X-MBX-APIKEY': self.api_key},
@@ -368,7 +430,7 @@ class SimpleTradingClient:
             
             params['signature'] = signature
             
-            response = requests.get(
+            response = self.session.get(
                 f"{self.host}/api/v1/allOrders",
                 params=params,
                 headers={
@@ -422,7 +484,7 @@ class SimpleTradingClient:
             
             params['signature'] = signature
             
-            response = requests.delete(
+            response = self.session.delete(
                 f"{self.host}/api/v1/allOpenOrders",
                 params=params,
                 headers={
@@ -466,7 +528,7 @@ class SimpleTradingClient:
             if symbol:
                 url += f"?symbol={symbol}"
             
-            response = requests.get(
+            response = self.session.get(
                 url,
                 proxies=self.proxies,
                 timeout=10
@@ -511,7 +573,7 @@ class SimpleTradingClient:
             
             params['signature'] = signature
             
-            response = requests.get(
+            response = self.session.get(
                 f"{self.host}/api/v1/openOrders",
                 params=params,
                 headers={'X-MBX-APIKEY': self.api_key},
@@ -557,7 +619,7 @@ class SimpleTradingClient:
             
             params['signature'] = signature
             
-            response = requests.get(
+            response = self.session.get(
                 f"{self.host}/api/v1/commissionRate",
                 params=params,
                 headers={'X-MBX-APIKEY': self.api_key},
