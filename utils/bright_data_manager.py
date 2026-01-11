@@ -215,7 +215,8 @@ class BrightDataManager:
                     lines = content.split('\n')
                     for line in lines:
                         line = line.strip()
-                        if line.startswith('IP Address:') or 'IP:' in line:
+                        # 检查IP相关字段
+                        if 'IP' in line and ('Address:' in line or ':' in line):
                             # 提取IP地址
                             import re
                             ip_match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', line)
@@ -227,17 +228,30 @@ class BrightDataManager:
                             region = line.replace('Region:', '').strip()
                         elif line.startswith('City:'):
                             city = line.replace('City:', '').strip()
-                        elif 'Country:' in line:
-                            # 尝试从包含Country信息的一行中提取
-                            parts = line.split(',')
-                            for part in parts:
-                                part = part.strip()
-                                if 'Country:' in part:
-                                    country = part.replace('Country:', '').strip()
-                                elif 'Region:' in part:
-                                    region = part.replace('Region:', '').strip()
-                                elif 'City:' in part:
-                                    city = part.replace('City:', '').strip()
+                        elif line.startswith('Latitude:'):
+                            # 有时位置信息在单独行中
+                            pass  # 跳过纬度行
+                        elif 'Country:' in line and ',' in line:
+                            # 尝试从包含Country信息的一行中提取，如 "Country: US, Latitude: 37.751"
+                            if 'City:' in line:
+                                city_part = line.split('City:')[-1].split(',')[0].strip()
+                                city = city_part
+                            if 'Region:' in line:
+                                region_part = line.split('Region:')[-1].split(',')[0].strip()
+                                region = region_part
+                            if 'Country:' in line:
+                                country_part = line.split('Country:')[-1].split(',')[0].strip()
+                                country = country_part
+                    
+                    # 如果仍未找到IP地址，尝试在整个内容中搜索IP
+                    if current_ip == 'unknown':
+                        import re
+                        # 搜索整个内容中的IP地址
+                        ip_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
+                        ip_matches = re.findall(ip_pattern, content)
+                        if ip_matches:
+                            # 使用第一个匹配的IP地址
+                            current_ip = ip_matches[0]
                                 
                     # 如果没有找到地区信息，尝试从文本中解析
                     if country == 'Unknown' and 'Country:' in content:
