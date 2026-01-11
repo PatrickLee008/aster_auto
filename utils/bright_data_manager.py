@@ -99,24 +99,24 @@ class BrightDataManager:
         session_id = f"task{task_id:04d}"
         
         # 根据代理类型创建不同的用户名格式
-        # 使用您的实际格式: brd-customer-hl_5e1f2ce5-zone-aster-country-us
+        # 使用官方格式: brd-customer-hl_5e1f2ce5-zone-aster-country-us
         # 例如: brd-customer-hl_5e1f2ce5-zone-aster-country-us:jlfm7ayb6puo@brd.superproxy.io:33335
-        base_username = self.customer
+        base_username = f"{self.customer}-country-{self.target_country}"
         if proxy_type == 'residential':
             # 住宅代理格式
-            username = f"{base_username}-country-{self.target_country}-session-{session_id}"
+            username = f"{base_username}-session-{session_id}"
         elif proxy_type == 'datacenter':
             # 数据中心代理格式
-            username = f"{base_username}-zone-datacenter-country-{self.target_country}-session-{session_id}"
+            username = f"{base_username}-session-{session_id}"
         elif proxy_type == 'mobile':
             # 移动代理格式
-            username = f"{base_username}-zone-mobile-country-{self.target_country}-session-{session_id}"
+            username = f"{base_username}-session-{session_id}"
         elif proxy_type == 'isp':
-            # ISP代理格式
-            username = f"{base_username}-zone-isp-country-{self.target_country}-session-{session_id}"
+            # ISP代理格式 - 使用基础国家格式，代理类型在测试URL中指定
+            username = f"{base_username}-session-{session_id}"
         else:
             # 默认使用住宅代理
-            username = f"{base_username}-country-{self.target_country}-session-{session_id}"
+            username = f"{base_username}-session-{session_id}"
         
         return {
             'proxy_type': proxy_type,
@@ -147,8 +147,17 @@ class BrightDataManager:
                 'https': proxy_url
             }
                 
-            # 使用Bright Data的IP测试URL
-            test_url = 'https://lumtest.com/myip.json'
+            # 使用Bright Data的官方测试URL
+            # 根据代理类型选择合适的测试URL
+            if proxy_config.get('proxy_type') == 'isp':
+                test_url = f'https://geo.brdtest.com/welcome.txt?product=isp&method=native'
+            elif proxy_config.get('proxy_type') == 'mobile':
+                test_url = f'https://geo.brdtest.com/welcome.txt?product=mobile&method=native'
+            elif proxy_config.get('proxy_type') == 'datacenter':
+                test_url = f'https://geo.brdtest.com/welcome.txt?product=datacenter&method=native'
+            else:
+                # 对于住宅代理或其他类型，使用通用测试URL
+                test_url = 'https://lumtest.com/myip.json'
                 
             # 记录开始测试时间以计算延迟
             import time
@@ -168,30 +177,87 @@ class BrightDataManager:
             latency_ms = round((end_time - start_time) * 1000)
                 
             if response.status_code == 200:
-                ip_info = response.json()
-                    
-                # Bright Data API通常直接返回IP
-                current_ip = ip_info.get('ip', ip_info.get('current_ip', 'unknown'))
-                    
-                # 获取位置信息
-                country = ip_info.get('country', ip_info.get('geo', {}).get('country', 'Unknown'))
-                region = ip_info.get('region', ip_info.get('geo', {}).get('region', 'Unknown'))
-                city = ip_info.get('city', ip_info.get('geo', {}).get('city', 'Unknown'))
-                                        
-                # 尝试从其他可能的字段获取位置信息
-                if country == 'Unknown':
-                    country = ip_info.get('country_code', 'Unknown')
-                if region == 'Unknown':
-                    region = ip_info.get('region_code', 'Unknown')
-                if city == 'Unknown':
-                    city = ip_info.get('city_name', 'Unknown')
-                    
+                # 检查响应内容类型来决定如何解析
+                content_type = response.headers.get('content-type', '').lower()
+                            
+                if 'application/json' in content_type:
+                    # JSON格式响应
+                    ip_info = response.json()
+                                
+                    # Bright Data API通常直接返回IP
+                    current_ip = ip_info.get('ip', ip_info.get('current_ip', 'unknown'))
+                                
+                    # 获取位置信息
+                    country = ip_info.get('country', ip_info.get('geo', {}).get('country', 'Unknown'))
+                    region = ip_info.get('region', ip_info.get('geo', {}).get('region', 'Unknown'))
+                    city = ip_info.get('city', ip_info.get('geo', {}).get('city', 'Unknown'))
+                                                        
+                    # 尝试从其他可能的字段获取位置信息
+                    if country == 'Unknown':
+                        country = ip_info.get('country_code', 'Unknown')
+                    if region == 'Unknown':
+                        region = ip_info.get('region_code', 'Unknown')
+                    if city == 'Unknown':
+                        city = ip_info.get('city_name', 'Unknown')
+                else:
+                    # 文本格式响应 (如 geo.brdtest.com)
+                    content = response.text
+                    current_ip = 'unknown'
+                    country = 'Unknown'
+                    region = 'Unknown'
+                    city = 'Unknown'
+                                
+                    # 从文本内容中提取IP和位置信息
+                    lines = content.split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith('IP Address:') or 'IP:' in line:
+                            # 提取IP地址
+                            import re
+                            ip_match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', line)
+                            if ip_match:
+                                current_ip = ip_match.group()
+                        elif line.startswith('Country:'):
+                            country = line.replace('Country:', '').strip()
+                        elif line.startswith('Region:'):
+                            region = line.replace('Region:', '').strip()
+                        elif line.startswith('City:'):
+                            city = line.replace('City:', '').strip()
+                        elif 'Country:' in line:
+                            # 尝试从包含Country信息的一行中提取
+                            parts = line.split(',')
+                            for part in parts:
+                                part = part.strip()
+                                if 'Country:' in part:
+                                    country = part.replace('Country:', '').strip()
+                                elif 'Region:' in part:
+                                    region = part.replace('Region:', '').strip()
+                                elif 'City:' in part:
+                                    city = part.replace('City:', '').strip()
+                                
+                    # 如果没有找到地区信息，尝试从文本中解析
+                    if country == 'Unknown' and 'Country:' in content:
+                        import re
+                        country_match = re.search(r'Country:\s*(\w+)', content)
+                        if country_match:
+                            country = country_match.group(1)
+                    if region == 'Unknown' and 'Region:' in content:
+                        import re
+                        region_match = re.search(r'Region:\s*([\w\s]+)', content)
+                        if region_match:
+                            region = region_match.group(1).strip()
+                    if city == 'Unknown' and 'City:' in content:
+                        import re
+                        city_match = re.search(r'City:\s*([\w\s]+)', content)
+                        if city_match:
+                            city = city_match.group(1).strip()
+                            
                 proxy_config['current_ip'] = current_ip
                 proxy_config['actual_country'] = country
-                proxy_config['actual_region'] = f"{city}, {region}"
+                proxy_config['actual_region'] = f"{city}, {region}" if city != 'Unknown' and region != 'Unknown' else region
                 proxy_config['latency'] = latency_ms  # 添加延迟信息
-                    
-                self.logger.info(f"✅ 代理测试成功 - IP: {current_ip}, 位置: {region}, {country}, 延迟: {latency_ms}ms")
+                            
+                self.logger.info(f"✅ 代理测试成功 - IP: {current_ip}, 位置: {proxy_config['actual_region']}, {country}, 延迟: {latency_ms}ms")
                 return True, latency_ms
             else:
                 self.logger.warning(f"❌ 代理测试HTTP错误: {response.status_code}")
