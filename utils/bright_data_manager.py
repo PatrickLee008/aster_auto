@@ -243,15 +243,34 @@ class BrightDataManager:
                                 country_part = line.split('Country:')[-1].split(',')[0].strip()
                                 country = country_part
                     
-                    # 如果仍未找到IP地址，尝试在整个内容中搜索IP
+                    # 如果仍未找到IP地址，尝试从更具体的位置提取
                     if current_ip == 'unknown':
-                        import re
-                        # 搜索整个内容中的IP地址
-                        ip_pattern = r'\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
-                        ip_matches = re.findall(ip_pattern, content)
-                        if ip_matches:
-                            # 使用第一个匹配的IP地址
-                            current_ip = ip_matches[0]
+                        # 查找包含IP地址的特定行，如 "IP Address: xxx.xxx.xxx.xxx" 或类似的
+                        lines = content.split('\n')
+                        for line in lines:
+                            line_lower = line.lower().strip()
+                            if 'ip' in line_lower and 'address' in line_lower:
+                                import re
+                                ip_match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', line)
+                                if ip_match:
+                                    # 确保这不是1.1.1.1这样的公共IP
+                                    extracted_ip = ip_match.group()
+                                    if not extracted_ip.startswith('1.1.1.') and extracted_ip != '1.1.1.1':
+                                        current_ip = extracted_ip
+                                        break
+                        
+                        # 如果仍然没找到，尝试查找 "IP:" 格式
+                        if current_ip == 'unknown':
+                            for line in lines:
+                                line_lower = line.lower().strip()
+                                if ': ' in line and ('ip' in line_lower or 'address' in line_lower):
+                                    import re
+                                    ip_match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', line)
+                                    if ip_match:
+                                        extracted_ip = ip_match.group()
+                                        if not extracted_ip.startswith('1.1.1.') and extracted_ip != '1.1.1.1':
+                                            current_ip = extracted_ip
+                                            break
                                 
                     # 如果没有找到地区信息，尝试从文本中解析
                     if country == 'Unknown' and 'Country:' in content:
