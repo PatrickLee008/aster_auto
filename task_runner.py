@@ -86,7 +86,7 @@ def run_task(task_id: int):
             # 尝试获取任务级代理配置 - 优先使用Bright Data
             task_proxy = None
             if brightdata_enabled:
-                task_proxy = get_task_bright_data_config(task_id, 'residential')
+                task_proxy = get_task_bright_data_config(task_id, 'isp')
             
             proxy_info = None
             if task_proxy and task_proxy.get('proxy_enabled'):
