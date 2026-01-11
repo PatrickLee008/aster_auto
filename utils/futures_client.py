@@ -84,7 +84,7 @@ class AsterFuturesClient:
         
         # 设置代理
         if use_proxy:
-            # 如果提供了认证信息，使用 HTTP 代理（Smartproxy）
+            # 如果提供了认证信息，使用 HTTP 代理（Bright Data）
             if proxy_auth:
                 proxy_url = f'http://{proxy_auth}@{proxy_host}:{proxy_port}'
                 print(f"使用 HTTP 认证代理: {proxy_host}:{proxy_port}")

@@ -47,11 +47,12 @@ AsterDEX Multi-Wallet Management System is a Flask-based web application for man
 - Authentication via Flask-Login with role-based access control (admin users)
 
 **Proxy Support**:
-- Two-tier proxy system:
+- Three-tier proxy system:
   1. Global proxy (development): SOCKS5 proxy configured in `.env` for all requests
-  2. Task-level proxy (production): Smartproxy residential IP assigned per task
-- Proxy configuration via `utils/smartproxy_manager.py` and `utils/proxy_config.py`
-- Smartproxy enabled/disabled via database config or environment variable
+  2. Task-level proxy (production): Bright Data residential IP assigned per task
+  3. Bright Data (recommended): High-performance proxy service with lower latency
+- Proxy configuration via `utils/bright_data_manager.py` and `utils/proxy_config.py`
+- Bright Data enabled/disabled via database config or environment variable
 
 ## Common Development Commands
 
@@ -127,11 +128,11 @@ PROXY_HOST=127.0.0.1
 PROXY_PORT=7890
 PROXY_TYPE=socks5
 
-# Smartproxy (Production)
+# Bright Data (Production)
 SMARTPROXY_ENABLED=true
 SMARTPROXY_BASE_USERNAME=<username>
 SMARTPROXY_PASSWORD=<password>
-SMARTPROXY_RESIDENTIAL_HOST=gate.decodo.com
+BRIGHTDATA_HOST=brd.superproxy.io
 SMARTPROXY_RESIDENTIAL_PORT=10001
 SMARTPROXY_SESSION_DURATION=60
 ```
@@ -173,10 +174,12 @@ To add a new strategy:
 5. Wallet model will auto-encrypt/decrypt credentials for strategy use
 
 ### Proxy Configuration Priority
-1. Database config `smartproxy_enabled` (highest priority)
-2. Environment variable `SMARTPROXY_ENABLED` (fallback)
-3. Task-specific proxy assigned via Smartproxy manager (production)
-4. Global SOCKS5 proxy (development fallback)
+1. Database config `brightdata_enabled` (highest priority)
+2. Environment variable `BRIGHTDATA_ENABLED` (fallback)
+3. Database config `brightdata_enabled`
+4. Environment variable `SMARTPROXY_ENABLED` (fallback)
+5. Task-specific proxy assigned via Bright Data manager (production)
+6. Global SOCKS5 proxy (development fallback)
 
 ### Logging
 - Task logs: `task_logs/<task_name>.log` (one file per task, unique by task name)
@@ -229,7 +232,7 @@ Tasks track comprehensive statistics:
 
 ### Proxy Issues
 - For development: Ensure local SOCKS5 proxy is running (default: 127.0.0.1:7890)
-- For production: Check Smartproxy credentials are valid
+- For production: Check Bright Data credentials are valid
 - Test proxy connectivity via `utils/tests/proxy_connection_test.py`
 
 ### Encryption Key Issues
@@ -277,7 +280,7 @@ utils/                      # Utility functions
   - process_manager.py      # Process spawn/terminate
   - task_logger.py          # Task log file management
   - proxy_config.py         # Proxy configuration
-  - smartproxy_manager.py   # Smartproxy IP assignment
+  - bright_data_manager.py  # Bright Data IP assignment
   - task_progress_parser.py # Parse task progress from logs
 
 routes/                     # Additional route modules

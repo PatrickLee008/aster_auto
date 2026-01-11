@@ -11,6 +11,8 @@ from .spot_client import AsterSpotClient
 from .futures_client import AsterFuturesClient
 from .simple_trading_client import SimpleTradingClient
 from .market_trading_client import MarketTradingClient
+from .bright_data_manager import get_bright_data_manager, get_task_bright_data_config
+from .bright_data_client import BrightDataClient, create_bright_data_client
 
 __all__ = [
     'encrypt_data', 'decrypt_data', 'generate_encryption_key',
@@ -18,5 +20,7 @@ __all__ = [
     'task_logger', 'TaskLogger',
     'get_proxy_config', 'is_proxy_enabled', 'get_proxy_info',
     'AsterSpotClient', 'AsterFuturesClient',
-    'SimpleTradingClient', 'MarketTradingClient'
+    'SimpleTradingClient', 'MarketTradingClient',
+    'get_bright_data_manager', 'get_task_bright_data_config',
+    'BrightDataClient', 'create_bright_data_client'
 ]

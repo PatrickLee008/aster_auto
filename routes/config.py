@@ -22,13 +22,14 @@ def admin_required(f):
     return decorated_function
 
 
-@config_bp.route('/smartproxy', methods=['GET'])
+
+@config_bp.route('/brightdata', methods=['GET'])
 @login_required
 @admin_required
-def get_smartproxy_config():
-    """获取Smartproxy配置"""
+def get_brightdata_config():
+    """获取Bright Data配置"""
     try:
-        enabled = SystemConfig.get_value('smartproxy_enabled', False)
+        enabled = SystemConfig.get_value('brightdata_enabled', False)
         
         return jsonify({
             'success': True,
@@ -41,28 +42,30 @@ def get_smartproxy_config():
         }), 500
 
 
-@config_bp.route('/smartproxy', methods=['POST'])
+@config_bp.route('/brightdata', methods=['POST'])
 @login_required
 @admin_required
-def update_smartproxy_config():
-    """更新Smartproxy配置"""
+def update_brightdata_config():
+    """更新Bright Data配置"""
     try:
         data = request.get_json()
         enabled = data.get('enabled', False)
         
         # 保存到数据库
         SystemConfig.set_value(
-            'smartproxy_enabled',
+            'brightdata_enabled',
             enabled,
             config_type='boolean',
-            description='Smartproxy任务级代理开关'
+            description='Bright Data任务级代理开关'
         )
+        
+
         
         status_text = '已启用' if enabled else '已禁用'
         
         return jsonify({
             'success': True,
-            'message': f'Smartproxy代理{status_text}',
+            'message': f'Bright Data代理{status_text}',
             'enabled': enabled
         })
     except Exception as e:

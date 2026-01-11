@@ -31,17 +31,47 @@ def run_task(task_id: int):
                 print(f"任务 {task_id} 不存在")
                 return
             
-            # 创建日志记录器（直接使用 logging.Logger，不重复调用 log_task_start）
+            # 创建日志记录器
+            from utils import TaskLogger
+            task_logger_manager = TaskLogger()
+            
+            # 准备代理信息
+            proxy_info = None
+            if task_proxy and task_proxy.get('proxy_enabled'):
+                proxy_info = {
+                    'proxy_type': task_proxy.get('proxy_type', 'residential'),
+                    'current_ip': task_proxy.get('current_ip', 'unknown'),
+                    'actual_country': task_proxy.get('actual_country', task_proxy.get('country', 'US')),
+                    'actual_region': task_proxy.get('actual_region', 'N/A'),
+                    'session_id': task_proxy.get('session_id', 'N/A'),
+                    'host': task_proxy.get('proxy_host'),
+                    'port': task_proxy.get('proxy_port'),
+                    'latency': task_proxy.get('latency')  # 如果有延迟信息的话
+                }
+            
+            # 使用TaskLogger记录任务开始，包含代理信息
+            task_logger_manager.log_task_start(
+                task_name=task.name,
+                task_id=task.id,
+                parameters={
+                    'strategy': strategy.name,
+                    'symbol': task.symbol,
+                    'quantity': task.quantity,
+                    'interval': task.interval,
+                    'rounds': task.rounds
+                },
+                proxy_info=proxy_info
+            )
+            
+            # 获取logger实例用于后续日志记录
             logger_name = f"task_{task.id}"
             logger = logging.getLogger(logger_name)
             
-            # 如果 logger 还没有配置，说明是首次创建，需要配置
+            # 确保logger已配置
             if not logger.handlers:
                 logger.setLevel(logging.INFO)
                 
                 # 创建文件处理器
-                from utils import TaskLogger
-                task_logger_manager = TaskLogger()
                 log_file = task_logger_manager.get_log_file_path(task.name)
                 file_handler = logging.FileHandler(log_file, encoding='utf-8')
                 file_handler.setLevel(logging.INFO)
@@ -79,29 +109,31 @@ def run_task(task_id: int):
             # 准备钱包配置（支持任务级代理）
             # 优先读取数据库配置，如果未设置则回退到环境变量
             from models import SystemConfig
-            from utils.smartproxy_manager import get_task_proxy_config
+            from utils.bright_data_manager import get_task_bright_data_config
             from utils.proxy_config import is_proxy_enabled, get_proxy_info
             
-            # 从数据库读取Smartproxy开关（优先级最高）
-            smartproxy_db_enabled = SystemConfig.get_value('smartproxy_enabled', None)
+            # 从数据库读取Bright Data开关（优先级最高）
+            brightdata_db_enabled = SystemConfig.get_value('brightdata_enabled', None)
             
             # 如果数据库有配置，使用数据库配置；否则使用环境变量
-            if smartproxy_db_enabled is not None:
-                smartproxy_enabled = smartproxy_db_enabled
-                logger.info(f"🔧 使用数据库配置: Smartproxy={smartproxy_enabled}")
+            if brightdata_db_enabled is not None:
+                brightdata_enabled = brightdata_db_enabled
+                logger.info(f"🔧 使用数据库配置: BrightData={brightdata_enabled}")
             else:
                 # 回退到环境变量（首次运行或未设置时）
                 from config_env import get_env_bool
-                smartproxy_enabled = get_env_bool('SMARTPROXY_ENABLED', False)
-                logger.info(f"🔧 使用环境变量配置: Smartproxy={smartproxy_enabled}")
+                brightdata_enabled = get_env_bool('BRIGHTDATA_ENABLED', False)
+                logger.info(f"🔧 使用环境变量配置: BrightData={brightdata_enabled}")
             
-            # 尝试获取任务级代理配置
+            # 尝试获取任务级代理配置 - 优先使用Bright Data
             task_proxy = None
-            if smartproxy_enabled:
-                task_proxy = get_task_proxy_config(task_id, 'residential')
+            if brightdata_enabled:
+                task_proxy = get_task_bright_data_config(task_id, 'residential')
+            
+
             
             if task_proxy and task_proxy.get('proxy_enabled'):
-                # 使用任务级代理（Smartproxy）
+                # 使用任务级代理（Bright Data）
                 proxy_enabled = True
                 proxy_host = task_proxy.get('proxy_host')
                 proxy_port = task_proxy.get('proxy_port')
@@ -227,10 +259,8 @@ def run_task(task_id: int):
                     task.update_status('error', error_message="策略执行失败")
             
             # 释放任务代理资源
-            if task_proxy and task_proxy.get('proxy_enabled'):
-                from utils.smartproxy_manager import get_proxy_manager
-                proxy_manager = get_proxy_manager()
-                proxy_manager.release_proxy_for_task(task_id)
+            if task_proxy and task_proxy.get('proxy_enabled') and task_proxy.get('proxy_type') != 'global':
+                # 目前只记录日志，Bright Data代理不需要显式释放
                 logger.info(f"🌐 任务级代理资源已释放")
             
             # 关闭日志处理器
@@ -245,9 +275,7 @@ def run_task(task_id: int):
             
             # 释放任务代理资源（异常情况）
             try:
-                from utils.smartproxy_manager import get_proxy_manager
-                proxy_manager = get_proxy_manager()
-                proxy_manager.release_proxy_for_task(task_id)
+                # 目前只记录日志，Bright Data代理不需要显式释放
                 print(f"🌐 任务级代理资源已释放（异常情况）")
             except:
                 pass

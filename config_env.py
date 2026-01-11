@@ -107,16 +107,17 @@ PROXY_CONFIG = {
     'type': get_env('PROXY_TYPE', 'socks5')
 }
 
-# Smartproxy配置
-SMARTPROXY_CONFIG = {
-    'enabled': get_env_bool('SMARTPROXY_ENABLED', False),
-    'base_username': get_env('SMARTPROXY_BASE_USERNAME', ''),
-    'password': get_env('SMARTPROXY_PASSWORD', ''),
-    'residential_host': get_env('SMARTPROXY_RESIDENTIAL_HOST', 'gate.decodo.com'),
-    'residential_port': get_env_int('SMARTPROXY_RESIDENTIAL_PORT', 10001),
-    'datacenter_host': get_env('SMARTPROXY_DATACENTER_HOST', 'gate.decodo.com'),
-    'datacenter_port': get_env_int('SMARTPROXY_DATACENTER_PORT', 8001),
-    'session_duration': get_env_int('SMARTPROXY_SESSION_DURATION', 60)
+
+# Bright Data配置
+BRIGHTDATA_CONFIG = {
+    'enabled': get_env_bool('BRIGHTDATA_ENABLED', False),
+    'customer': get_env('BRIGHTDATA_CUSTOMER', ''),
+    'password': get_env('BRIGHTDATA_PASSWORD', ''),
+    'zone': get_env('BRIGHTDATA_ZONE', 'aster'),
+    'country': get_env('BRIGHTDATA_COUNTRY', 'us'),
+    'host': get_env('BRIGHTDATA_HOST', 'brd.superproxy.io'),
+    'port': get_env_int('BRIGHTDATA_PORT', 33335),
+    'session_duration': get_env_int('BRIGHTDATA_SESSION_DURATION', 60)
 }
 
 # 期货交易配置 (仅用作策略回退，钱包管理器使用数据库配置)
@@ -207,13 +208,6 @@ def print_config_status():
     if proxy_dict:
         print(f"  代理地址: {proxy_dict['https']}")
     
-    # Smartproxy配置
-    smartproxy_ready = SMARTPROXY_CONFIG['enabled'] and SMARTPROXY_CONFIG['base_username'] and SMARTPROXY_CONFIG['password']
-    print(f"Smartproxy设置: {'启用' if smartproxy_ready else '禁用'}")
-    if smartproxy_ready:
-        print(f"  用户名: {SMARTPROXY_CONFIG['base_username']}")
-        print(f"  主机: {SMARTPROXY_CONFIG['residential_host']}:{SMARTPROXY_CONFIG['residential_port']}")
-        print(f"  会话时长: {SMARTPROXY_CONFIG['session_duration']}分钟")
     
     # 数据库配置
     print(f"数据库: {DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']}/{DATABASE_CONFIG['database']}")

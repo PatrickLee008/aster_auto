@@ -155,7 +155,7 @@ class TaskLogger:
         
         return logger
     
-    def log_task_start(self, task_name: str, task_id: int, parameters: dict = None):
+    def log_task_start(self, task_name: str, task_id: int, parameters: dict = None, proxy_info: dict = None):
         """
         记录任务开始
         
@@ -163,9 +163,22 @@ class TaskLogger:
             task_name: 任务名称
             task_id: 任务ID
             parameters: 任务参数
+            proxy_info: 代理信息
         """
         logger = self.create_logger(task_name, task_id)
         logger.info(f"任务启动成功")
+        
+        if proxy_info:
+            # 记录代理信息
+            logger.info("代理配置:")
+            logger.info(f"  代理类型: {proxy_info.get('proxy_type', 'N/A')}")
+            logger.info(f"  代理IP: {proxy_info.get('current_ip', 'N/A')}")
+            logger.info(f"  国家: {proxy_info.get('actual_country', proxy_info.get('country', 'N/A'))}")
+            logger.info(f"  区域: {proxy_info.get('actual_region', 'N/A')}")
+            if proxy_info.get('latency'):
+                logger.info(f"  延迟: {proxy_info.get('latency')}ms")
+            logger.info(f"  会话ID: {proxy_info.get('session_id', 'N/A')}")
+            logger.info(f"  服务器: {proxy_info.get('host', 'N/A')}:{proxy_info.get('port', 'N/A')}")
         
         if parameters:
             logger.info("任务参数:")
