@@ -84,9 +84,13 @@ def get_all_configs():
     try:
         configs = SystemConfig.get_all_configs()
         
+        # 添加代理状态
+        brightdata_enabled = SystemConfig.get_value('brightdata_enabled', False)
+        
         return jsonify({
             'success': True,
-            'configs': configs
+            'configs': configs,
+            'brightdata_enabled': brightdata_enabled
         })
     except Exception as e:
         return jsonify({

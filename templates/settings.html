@@ -129,13 +129,18 @@
                         <tr>
                             <td><i class="fas fa-globe me-2"></i>代理设置</td>
                             <td>
-                                {% if stats.proxy_enabled %}
-                                    <span class="badge bg-success">已启用</span>
-                                    {% if stats.proxy_info %}
-                                        <br><small class="text-muted">{{ stats.proxy_info.host }}:{{ stats.proxy_info.port }}</small>
-                                    {% endif %}
-                                {% else %}
-                                    <span class="badge bg-secondary">未启用</span>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="proxyToggle" {{ 'checked' if stats.proxy_enabled else '' }}>
+                                    <label class="form-check-label" for="proxyToggle">
+                                        {% if stats.proxy_enabled %}
+                                            <span class="badge bg-success">已启用</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">未启用</span>
+                                        {% endif %}
+                                    </label>
+                                </div>
+                                {% if stats.proxy_info %}
+                                    <br><small class="text-muted">{{ stats.proxy_info.host }}:{{ stats.proxy_info.port }}</small>
                                 {% endif %}
                             </td>
                         </tr>
@@ -616,7 +621,50 @@ function updateUptime() {
 document.addEventListener('DOMContentLoaded', function() {
     updateUptime();
     getLogsInfo(); // 加载日志信息
+    
+    // 初始化代理开关事件监听器
+    const proxyToggle = document.getElementById('proxyToggle');
+    if (proxyToggle) {
+        proxyToggle.addEventListener('change', function() {
+            updateProxySetting(this.checked);
+        });
+    }
 });
+
+// 更新代理设置
+async function updateProxySetting(enabled) {
+    try {
+        const response = await fetch('/api/config/brightdata', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                enabled: enabled
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const badge = document.querySelector('#proxyToggle + label span');
+            if (badge) {
+                badge.className = enabled ? 'badge bg-success' : 'badge bg-secondary';
+                badge.textContent = enabled ? '已启用' : '未启用';
+            }
+            
+            showSuccess(result.message);
+        } else {
+            // 如果更新失败，恢复开关状态
+            document.getElementById('proxyToggle').checked = !enabled;
+            showError(result.message || '更新代理设置失败');
+        }
+    } catch (error) {
+        // 如果请求失败，恢复开关状态
+        document.getElementById('proxyToggle').checked = !enabled;
+        showError('网络错误，请重试');
+    }
+}
 
 
 </script>

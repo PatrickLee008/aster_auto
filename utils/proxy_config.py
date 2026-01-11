@@ -3,46 +3,18 @@
 统一管理代理设置
 """
 
-def get_proxy_config():
-    """
-    获取代理配置
-    
-    Returns:
-        dict or None: 代理配置字典，如果禁用代理则返回None
-    """
-    try:
-        from config_env import PROXY_CONFIG
-        
-        if not PROXY_CONFIG['enabled']:
-            return None
-        
-        proxy_url = f"{PROXY_CONFIG['type']}://{PROXY_CONFIG['host']}:{PROXY_CONFIG['port']}"
-        return {
-            'http': proxy_url,
-            'https': proxy_url
-        }
-        
-    except ImportError:
-        # 如果没有配置文件，默认禁用代理（生产环境安全）
-        return None
-    except Exception as e:
-        print(f"获取代理配置失败: {e}")
-        return None
-
-
 def is_proxy_enabled():
     """
-    检查代理是否启用
+    检查Bright Data代理是否启用
     
     Returns:
         bool: 代理是否启用
     """
     try:
-        from config_env import PROXY_CONFIG
-        return PROXY_CONFIG.get('enabled', False)
-    except ImportError:
-        return False  # 默认禁用代理，生产环境安全
-    except Exception:
+        from models.system_config import SystemConfig
+        return SystemConfig.get_value('brightdata_enabled', False)
+    except Exception as e:
+        print(f"检查代理状态失败: {e}")
         return False
 
 
@@ -54,24 +26,67 @@ def get_proxy_info():
         dict: 包含代理信息的字典
     """
     try:
-        from config_env import PROXY_CONFIG
-        return {
-            'enabled': PROXY_CONFIG.get('enabled', False),
-            'host': PROXY_CONFIG.get('host', '127.0.0.1'),
-            'port': PROXY_CONFIG.get('port', 7890),
-            'type': PROXY_CONFIG.get('type', 'socks5')
-        }
-    except ImportError:
-        return {
-            'enabled': False,  # 默认禁用代理，生产环境安全
-            'host': '127.0.0.1',
-            'port': 7890,
-            'type': 'socks5'
-        }
-    except Exception:
+        from models.system_config import SystemConfig
+        enabled = SystemConfig.get_value('brightdata_enabled', False)
+        
+        if enabled:
+            # 从环境变量获取Bright Data配置信息
+            from config_env import get_env
+            host = get_env('BRIGHTDATA_HOST', 'brd.superproxy.io')
+            port = get_env('BRIGHTDATA_PORT', '33335')
+            
+            return {
+                'enabled': enabled,
+                'host': host,
+                'port': port,
+                'type': 'http'
+            }
+        else:
+            return {
+                'enabled': enabled,
+                'host': None,
+                'port': None,
+                'type': None
+            }
+    except Exception as e:
+        print(f"获取代理信息失败: {e}")
         return {
             'enabled': False,
             'host': None,
             'port': None,
             'type': None
         }
+
+def get_proxy_config():
+    """
+    获取代理配置（此函数现在主要用于向后兼容）
+    
+    Returns:
+        dict or None: 代理配置字典，如果禁用代理则返回None
+    """
+    # 对于任务级代理，此函数不再主要使用，因为每个任务会有独立的代理配置
+    # 保留此函数用于向后兼容
+    try:
+        from models.system_config import SystemConfig
+        enabled = SystemConfig.get_value('brightdata_enabled', False)
+        
+        if not enabled:
+            return None
+        
+        # 从环境变量获取Bright Data配置
+        from config_env import get_env
+        host = get_env('BRIGHTDATA_HOST', 'brd.superproxy.io')
+        port = get_env('BRIGHTDATA_PORT', '33335')
+        username = get_env('BRIGHTDATA_USERNAME', '')
+        password = get_env('BRIGHTDATA_PASSWORD', '')
+        
+        if username and password:
+            proxy_url = f"http://{username}:{password}@{host}:{port}"
+            return {
+                'http': proxy_url,
+                'https': proxy_url
+            }
+        
+    except Exception as e:
+        print(f"获取代理配置失败: {e}")
+        return None
