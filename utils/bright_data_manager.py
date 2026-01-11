@@ -151,17 +151,9 @@ class BrightDataManager:
                 'https': proxy_url
             }
                 
-            # 使用Bright Data的官方测试URL
-            # 根据代理类型选择合适的测试URL
-            if proxy_config.get('proxy_type') == 'isp':
-                test_url = f'https://geo.brdtest.com/welcome.txt?product=isp&method=native'
-            elif proxy_config.get('proxy_type') == 'mobile':
-                test_url = f'https://geo.brdtest.com/welcome.txt?product=mobile&method=native'
-            elif proxy_config.get('proxy_type') == 'datacenter':
-                test_url = f'https://geo.brdtest.com/welcome.txt?product=datacenter&method=native'
-            else:
-                # 对于住宅代理或其他类型，使用通用测试URL
-                test_url = 'https://lumtest.com/myip.json'
+            # 使用可靠的服务来获取IP地址
+            # httpbin.org是可靠的IP检测服务，返回格式为 {"origin": "xxx.xxx.xxx.xxx"}
+            test_url = 'https://httpbin.org/ip'
                 
             # 记录开始测试时间以计算延迟
             import time
@@ -181,113 +173,23 @@ class BrightDataManager:
             latency_ms = round((end_time - start_time) * 1000)
                 
             if response.status_code == 200:
-                # 检查响应内容类型来决定如何解析
-                content_type = response.headers.get('content-type', '').lower()
-                            
-                if 'application/json' in content_type:
-                    # JSON格式响应
+                # httpbin.org返回JSON格式: {"origin": "xxx.xxx.xxx.xxx"}
+                try:
                     ip_info = response.json()
+                    current_ip = ip_info.get('origin', 'unknown')
                                 
-                    # Bright Data API通常直接返回IP
-                    current_ip = ip_info.get('ip', ip_info.get('current_ip', 'unknown'))
-                                
-                    # 获取位置信息
-                    country = ip_info.get('country', ip_info.get('geo', {}).get('country', 'Unknown'))
-                    region = ip_info.get('region', ip_info.get('geo', {}).get('region', 'Unknown'))
-                    city = ip_info.get('city', ip_info.get('geo', {}).get('city', 'Unknown'))
-                                                        
-                    # 尝试从其他可能的字段获取位置信息
-                    if country == 'Unknown':
-                        country = ip_info.get('country_code', 'Unknown')
-                    if region == 'Unknown':
-                        region = ip_info.get('region_code', 'Unknown')
-                    if city == 'Unknown':
-                        city = ip_info.get('city_name', 'Unknown')
-                else:
-                    # 文本格式响应 (如 geo.brdtest.com)
-                    content = response.text
-                    current_ip = 'unknown'
+                    # httpbin不提供位置信息，因此使用之前的逻辑获取位置信息
+                    # 但我们可以尝试通过IP地址获取位置信息
                     country = 'Unknown'
                     region = 'Unknown'
                     city = 'Unknown'
                                 
-                    # 从文本内容中提取IP和位置信息
-                    lines = content.split('\n')
-                    for line in lines:
-                        line = line.strip()
-                        # 检查IP相关字段
-                        if 'IP' in line and ('Address:' in line or ':' in line):
-                            # 提取IP地址
-                            import re
-                            ip_match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', line)
-                            if ip_match:
-                                current_ip = ip_match.group()
-                        elif line.startswith('Country:'):
-                            country = line.replace('Country:', '').strip()
-                        elif line.startswith('Region:'):
-                            region = line.replace('Region:', '').strip()
-                        elif line.startswith('City:'):
-                            city = line.replace('City:', '').strip()
-                        elif line.startswith('Latitude:'):
-                            # 有时位置信息在单独行中
-                            pass  # 跳过纬度行
-                        elif 'Country:' in line and ',' in line:
-                            # 尝试从包含Country信息的一行中提取，如 "Country: US, Latitude: 37.751"
-                            if 'City:' in line:
-                                city_part = line.split('City:')[-1].split(',')[0].strip()
-                                city = city_part
-                            if 'Region:' in line:
-                                region_part = line.split('Region:')[-1].split(',')[0].strip()
-                                region = region_part
-                            if 'Country:' in line:
-                                country_part = line.split('Country:')[-1].split(',')[0].strip()
-                                country = country_part
-                    
-                    # 如果仍未找到IP地址，尝试从更具体的位置提取
-                    if current_ip == 'unknown':
-                        # 查找包含IP地址的特定行，如 "IP Address: xxx.xxx.xxx.xxx" 或类似的
-                        lines = content.split('\n')
-                        for line in lines:
-                            line_lower = line.lower().strip()
-                            if 'ip' in line_lower and 'address' in line_lower:
-                                import re
-                                ip_match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', line)
-                                if ip_match:
-                                    # 确保这不是1.1.1.1这样的公共IP
-                                    extracted_ip = ip_match.group()
-                                    if not extracted_ip.startswith('1.1.1.') and extracted_ip != '1.1.1.1':
-                                        current_ip = extracted_ip
-                                        break
-                        
-                        # 如果仍然没找到，尝试查找 "IP:" 格式
-                        if current_ip == 'unknown':
-                            for line in lines:
-                                line_lower = line.lower().strip()
-                                if ': ' in line and ('ip' in line_lower or 'address' in line_lower):
-                                    import re
-                                    ip_match = re.search(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b', line)
-                                    if ip_match:
-                                        extracted_ip = ip_match.group()
-                                        if not extracted_ip.startswith('1.1.1.') and extracted_ip != '1.1.1.1':
-                                            current_ip = extracted_ip
-                                            break
-                                
-                    # 如果没有找到地区信息，尝试从文本中解析
-                    if country == 'Unknown' and 'Country:' in content:
-                        import re
-                        country_match = re.search(r'Country:\s*(\w+)', content)
-                        if country_match:
-                            country = country_match.group(1)
-                    if region == 'Unknown' and 'Region:' in content:
-                        import re
-                        region_match = re.search(r'Region:\s*([\w\s]+)', content)
-                        if region_match:
-                            region = region_match.group(1).strip()
-                    if city == 'Unknown' and 'City:' in content:
-                        import re
-                        city_match = re.search(r'City:\s*([\w\s]+)', content)
-                        if city_match:
-                            city = city_match.group(1).strip()
+                except Exception as e:
+                    self.logger.warning(f"解析httpbin响应失败: {e}")
+                    current_ip = 'unknown'
+                    country = 'Unknown'
+                    region = 'Unknown'
+                    city = 'Unknown'
                             
                 proxy_config['current_ip'] = current_ip
                 proxy_config['actual_country'] = country
