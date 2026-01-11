@@ -637,6 +637,12 @@ class SimpleTradingClient:
             print(f"获取手续费率错误: {e}")
             return None
 
+    def close(self):
+        """关闭会话并释放连接资源"""
+        if hasattr(self, 'session'):
+            self.session.close()
+
+
 if __name__ == '__main__':
     # 测试简化客户端
     print("测试简化交易客户端")
@@ -664,3 +670,5 @@ if __name__ == '__main__':
             print("❌ 简化客户端下单失败")
     else:
         print("连接测试失败")
+    # 确保关闭连接
+    client.close()
