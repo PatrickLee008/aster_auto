@@ -54,12 +54,16 @@ class BrightDataManager:
             self.logger.error("Bright Data凭证未配置")
             return None
             
-        # 检查缓存
+        # 检查缓存，但如果IP未知则重新获取
         cache_key = f"{task_id}_{proxy_type}"
         if cache_key in self.task_proxy_cache:
-            # 返回缓存的代理配置，但更新时间戳
             cached_proxy = self.task_proxy_cache[cache_key]
-            return cached_proxy
+            # 如果缓存的IP是unknown，则重新获取代理配置
+            if cached_proxy.get('current_ip') == 'unknown':
+                self.logger.info(f"缓存的IP为unknown，重新获取任务 {task_id} 的代理配置")
+            else:
+                # 返回缓存的代理配置
+                return cached_proxy
         
         try:
             proxy_config = self._create_proxy_config(task_id, proxy_type)
