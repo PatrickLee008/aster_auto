@@ -35,34 +35,6 @@ def run_task(task_id: int):
             from utils import TaskLogger
             task_logger_manager = TaskLogger()
             
-            # 准备代理信息
-            proxy_info = None
-            if task_proxy and task_proxy.get('proxy_enabled'):
-                proxy_info = {
-                    'proxy_type': task_proxy.get('proxy_type', 'residential'),
-                    'current_ip': task_proxy.get('current_ip', 'unknown'),
-                    'actual_country': task_proxy.get('actual_country', task_proxy.get('country', 'US')),
-                    'actual_region': task_proxy.get('actual_region', 'N/A'),
-                    'session_id': task_proxy.get('session_id', 'N/A'),
-                    'host': task_proxy.get('proxy_host'),
-                    'port': task_proxy.get('proxy_port'),
-                    'latency': task_proxy.get('latency')  # 如果有延迟信息的话
-                }
-            
-            # 使用TaskLogger记录任务开始，包含代理信息
-            task_logger_manager.log_task_start(
-                task_name=task.name,
-                task_id=task.id,
-                parameters={
-                    'strategy': strategy.name,
-                    'symbol': task.symbol,
-                    'quantity': task.quantity,
-                    'interval': task.interval,
-                    'rounds': task.rounds
-                },
-                proxy_info=proxy_info
-            )
-            
             # 获取logger实例用于后续日志记录
             logger_name = f"task_{task.id}"
             logger = logging.getLogger(logger_name)
@@ -92,6 +64,57 @@ def run_task(task_id: int):
                 task.update_status('error', error_message="策略不存在")
                 return
             
+            # 准备代理信息
+            # 优先读取数据库配置，如果未设置则回退到环境变量
+            from models import SystemConfig
+            from utils.bright_data_manager import get_task_bright_data_config
+            from utils.proxy_config import is_proxy_enabled, get_proxy_info
+            
+            # 从数据库读取Bright Data开关（优先级最高）
+            brightdata_db_enabled = SystemConfig.get_value('brightdata_enabled', None)
+            
+            # 如果数据库有配置，使用数据库配置；否则使用环境变量
+            if brightdata_db_enabled is not None:
+                brightdata_enabled = brightdata_db_enabled
+                print(f"🔧 使用数据库配置: BrightData={brightdata_enabled}")
+            else:
+                # 回退到环境变量（首次运行或未设置时）
+                from config_env import get_env_bool
+                brightdata_enabled = get_env_bool('BRIGHTDATA_ENABLED', False)
+                print(f"🔧 使用环境变量配置: BrightData={brightdata_enabled}")
+            
+            # 尝试获取任务级代理配置 - 优先使用Bright Data
+            task_proxy = None
+            if brightdata_enabled:
+                task_proxy = get_task_bright_data_config(task_id, 'residential')
+            
+            proxy_info = None
+            if task_proxy and task_proxy.get('proxy_enabled'):
+                proxy_info = {
+                    'proxy_type': task_proxy.get('proxy_type', 'residential'),
+                    'current_ip': task_proxy.get('current_ip', 'unknown'),
+                    'actual_country': task_proxy.get('actual_country', task_proxy.get('country', 'US')),
+                    'actual_region': task_proxy.get('actual_region', 'N/A'),
+                    'session_id': task_proxy.get('session_id', 'N/A'),
+                    'host': task_proxy.get('proxy_host'),
+                    'port': task_proxy.get('proxy_port'),
+                    'latency': task_proxy.get('latency')  # 如果有延迟信息的话
+                }
+            
+            # 使用TaskLogger记录任务开始，包含代理信息
+            task_logger_manager.log_task_start(
+                task_name=task.name,
+                task_id=task.id,
+                parameters={
+                    'strategy': strategy.name,
+                    'symbol': task.symbol,
+                    'quantity': task.quantity,
+                    'interval': task.interval,
+                    'rounds': task.rounds
+                },
+                proxy_info=proxy_info
+            )
+            
             # 获取钱包配置
             wallet = task.wallet
             if not wallet:
@@ -105,32 +128,6 @@ def run_task(task_id: int):
                 logger.error("无法获取钱包凭据")
                 task.update_status('error', error_message="无法获取钱包凭据")
                 return
-            
-            # 准备钱包配置（支持任务级代理）
-            # 优先读取数据库配置，如果未设置则回退到环境变量
-            from models import SystemConfig
-            from utils.bright_data_manager import get_task_bright_data_config
-            from utils.proxy_config import is_proxy_enabled, get_proxy_info
-            
-            # 从数据库读取Bright Data开关（优先级最高）
-            brightdata_db_enabled = SystemConfig.get_value('brightdata_enabled', None)
-            
-            # 如果数据库有配置，使用数据库配置；否则使用环境变量
-            if brightdata_db_enabled is not None:
-                brightdata_enabled = brightdata_db_enabled
-                logger.info(f"🔧 使用数据库配置: BrightData={brightdata_enabled}")
-            else:
-                # 回退到环境变量（首次运行或未设置时）
-                from config_env import get_env_bool
-                brightdata_enabled = get_env_bool('BRIGHTDATA_ENABLED', False)
-                logger.info(f"🔧 使用环境变量配置: BrightData={brightdata_enabled}")
-            
-            # 尝试获取任务级代理配置 - 优先使用Bright Data
-            task_proxy = None
-            if brightdata_enabled:
-                task_proxy = get_task_bright_data_config(task_id, 'residential')
-            
-
             
             if task_proxy and task_proxy.get('proxy_enabled'):
                 # 使用任务级代理（Bright Data）
@@ -146,6 +143,7 @@ def run_task(task_id: int):
                 logger.info(f"   代理服务器: {proxy_host}:{proxy_port}")
                 logger.info(f"   代理IP: {current_ip}")
                 logger.info(f"   国家: {task_proxy.get('country', 'US')}")
+                logger.info(f"   区域: {task_proxy.get('actual_region', 'N/A')}")
             else:
                 # 回退到全局代理配置（开发环境）
                 proxy_enabled = is_proxy_enabled()
@@ -171,6 +169,7 @@ def run_task(task_id: int):
                 'current_ip': current_ip,  # 代理IP地址
                 'proxy_type': task_proxy.get('proxy_type') if task_proxy else None,
                 'country': task_proxy.get('country') if task_proxy else None,
+                'region': task_proxy.get('actual_region') if task_proxy else None,
                 'task_id': task_id  # 传递任务ID用于日志
             }
             
