@@ -19,11 +19,16 @@ class BrightDataManager:
         self.password = get_env('BRIGHTDATA_PASSWORD', '')
         self.zone = get_env('BRIGHTDATA_ZONE', 'aster')  # 代理区域
         self.country = get_env('BRIGHTDATA_COUNTRY', 'us')  # 目标国家
+        
+        # 代理目标国家设置 - 为避免区域限制，可自定义国家
+        self.target_country = get_env('BRIGHTDATA_TARGET_COUNTRY', self.country)  # 使用BRIGHTDATA_COUNTRY作为默认值
         self.session_duration = get_env('BRIGHTDATA_SESSION_DURATION', '60')
         
         # Bright Data代理配置
         self.proxy_endpoint = get_env('BRIGHTDATA_HOST', 'brd.superproxy.io')
         self.proxy_port = int(get_env('BRIGHTDATA_PORT', '33335'))  # 根据您的配置使用33335端口
+        
+
         
         # 任务代理映射缓存
         self.task_proxy_cache = {}
@@ -95,19 +100,19 @@ class BrightDataManager:
         base_username = self.customer
         if proxy_type == 'residential':
             # 住宅代理格式
-            username = f"{base_username}-country-{self.country}-session-{session_id}"
+            username = f"{base_username}-country-{self.target_country}-session-{session_id}"
         elif proxy_type == 'datacenter':
             # 数据中心代理格式
-            username = f"{base_username}-zone-datacenter-country-{self.country}-session-{session_id}"
+            username = f"{base_username}-zone-datacenter-country-{self.target_country}-session-{session_id}"
         elif proxy_type == 'mobile':
             # 移动代理格式
-            username = f"{base_username}-zone-mobile-country-{self.country}-session-{session_id}"
+            username = f"{base_username}-zone-mobile-country-{self.target_country}-session-{session_id}"
         elif proxy_type == 'isp':
             # ISP代理格式
-            username = f"{base_username}-zone-isp-country-{self.country}-session-{session_id}"
+            username = f"{base_username}-zone-isp-country-{self.target_country}-session-{session_id}"
         else:
             # 默认使用住宅代理
-            username = f"{base_username}-country-{self.country}-session-{session_id}"
+            username = f"{base_username}-country-{self.target_country}-session-{session_id}"
         
         return {
             'proxy_type': proxy_type,
