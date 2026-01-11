@@ -2324,17 +2324,24 @@ class VolumeStrategy:
                 self.log("\n🛑 策略因停止请求结束")
                 self._cleanup_on_stop()
             
+            # 清理交易客户端连接
+            self._cleanup_clients()
+            
             return self.completed_rounds > 0
             
         except KeyboardInterrupt:
             self.log("\n用户中断策略执行")
             # 用户中断时也执行清理和统计
             self._cleanup_on_stop()
+            # 清理交易客户端连接
+            self._cleanup_clients()
             return False
         except Exception as e:
             self.log(f"策略执行错误: {e}")
             # 异常时也执行清理和统计
             self._cleanup_on_stop()
+            # 清理交易客户端连接
+            self._cleanup_clients()
             return False
     
     def _cleanup_on_stop(self):
@@ -2358,6 +2365,22 @@ class VolumeStrategy:
             
         except Exception as e:
             self.log(f"策略停止清理异常: {e}", 'error')
+    
+    def _cleanup_clients(self):
+        """清理交易客户端连接"""
+        try:
+            # 清理主要交易客户端
+            if hasattr(self, 'client') and self.client:
+                self.client.close()
+                self.log("✅ 主要交易客户端连接已关闭")
+            
+            # 清理市场交易客户端
+            if hasattr(self, 'market_client') and self.market_client:
+                self.market_client.close()
+                self.log("✅ 市场交易客户端连接已关闭")
+                
+        except Exception as e:
+            self.log(f"客户端连接清理异常: {e}", 'error')
     
     def _calculate_final_statistics(self):
         """计算最终统计数据（不调用API）"""
