@@ -2382,12 +2382,14 @@ class VolumeStrategy:
         try:
             # 清理主要交易客户端
             if hasattr(self, 'client') and self.client:
-                self.client.close()
+                if hasattr(self.client, 'close'):
+                    self.client.close()
                 self.log("✅ 主要交易客户端连接已关闭")
             
             # 清理市场交易客户端
             if hasattr(self, 'market_client') and self.market_client:
-                self.market_client.close()
+                if hasattr(self.market_client, 'close'):
+                    self.market_client.close()
                 self.log("✅ 市场交易客户端连接已关闭")
                 
         except Exception as e:
