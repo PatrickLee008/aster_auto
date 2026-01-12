@@ -2199,6 +2199,17 @@ class VolumeStrategy:
     
     def run(self) -> bool:
         """运行策略"""
+        # 重置统计数据
+        self.completed_rounds = 0
+        self.failed_rounds = 0
+        self.supplement_orders = 0
+        self.total_cost_diff = 0.0
+        self.buy_volume_usdt = 0.0
+        self.sell_volume_usdt = 0.0
+        self.total_fees_usdt = 0.0
+        self.usdt_balance_diff = 0.0
+        self.net_loss_usdt = 0.0
+        
         self.log(f"\n开始执行刷量策略...")
         
         if not self.connect():
