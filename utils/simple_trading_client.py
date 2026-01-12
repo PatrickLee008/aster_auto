@@ -95,7 +95,10 @@ class SimpleTradingClient:
             print(f"简化交易客户端初始化完成")
             print(f"使用全局代理: {self.proxies['https']}")
         else:
-            # 即使没有代理也配置会话适配器
+            # 没有代理时，初始化空的proxies字典
+            self.proxies = {}
+            
+            # 配置会话适配器
             from requests.adapters import HTTPAdapter
             from urllib3.util.retry import Retry
             
