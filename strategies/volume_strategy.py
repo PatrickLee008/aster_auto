@@ -2278,7 +2278,11 @@ class VolumeStrategy:
             # 记录最终计价货币余额并计算损耗
             self.final_usdt_balance = self.get_quote_balance()
             self.usdt_balance_diff = self.final_usdt_balance - self.initial_usdt_balance
-            self.net_loss_usdt = self.usdt_balance_diff - self.total_fees_usdt
+            # 净损耗 = 余额差值 + 总手续费（因为手续费已经体现在余额变化中）
+            # 或者理解为：净损耗 = 除手续费外的其他损失（如价差、滑点等）
+            # 根据财务逻辑：净损耗 = |余额差值| - 总手续费（当余额减少时）
+            net_other_losses = abs(self.usdt_balance_diff) - self.total_fees_usdt
+            self.net_loss_usdt = -net_other_losses if self.usdt_balance_diff < 0 else net_other_losses
             
             self.log(f"\n=== 策略执行完成 ===")
             # 计算实际执行的轮次
@@ -2400,9 +2404,10 @@ class VolumeStrategy:
         try:
             # 使用累计的统计数据，而不是调用API获取最终余额
             # final_usdt_balance 已在交易过程中通过余额变化累计计算
-            self.final_usdt_balance = self.initial_usdt_balance - self.total_fees_usdt
-            self.usdt_balance_diff = self.final_usdt_balance - self.initial_usdt_balance
-            self.net_loss_usdt = self.usdt_balance_diff
+            # 重新计算净损耗，与策略执行部分保持一致
+            # 净损耗 = 除手续费外的其他损失（如价差、滑点等）
+            net_other_losses = abs(self.usdt_balance_diff) - self.total_fees_usdt
+            self.net_loss_usdt = -net_other_losses if self.usdt_balance_diff < 0 else net_other_losses
             
             # 计算交易统计
             total_volume = self.buy_volume_usdt + self.sell_volume_usdt
